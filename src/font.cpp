@@ -9,7 +9,7 @@
         mode:  0非叠加模式  1叠加模式
 返回值：  无
 ******************************************************************************/
-void led_show_char(u32 (*leds)[8], u8 x, u8 y, u8 *p, u8 size, u32 fc, u32 bc, u8 mode)
+void led_show_char(u32 (*leds)[8], u8 x, u8 y, u8 *p, led_size size, u32 fc, u32 bc, u8 mode)
 {
     if (x < 0 || x >= LED_COL)
         return;
@@ -17,29 +17,34 @@ void led_show_char(u32 (*leds)[8], u8 x, u8 y, u8 *p, u8 size, u32 fc, u32 bc, u
         return;
 
     u8 char_ = 0;
+    u8 width = 0; // 字宽
     u8 hight = 0; // 字高
     u8 char_cnt = 0;
     u8 idx_x, idx_y = 0;
 
-    if (size == 3)
-        hight = 5;
-    else if (size == 4)
-        hight = 8;
+    hight = (size >> 0) & 0xff;
+    width = (size >> 8) & 0xff;
 
     while (*p != '\0')
-    {   
-        for (u8 i = 0; i < size; i++)
+    {
+        for (u8 i = 0; i < width; i++)
         {
-            if (size == 3)
-                char_ = ascii_0305[*p - ' '][i]; // 得到偏移后的值
-            else if (size == 4)
+            idx_x = char_cnt + x + i;
+            if (idx_x >= LED_COL)
+                break;
+
+            // 得到偏移后的值
+            if (size == LED_SZIE_35)
+                char_ = ascii_0305[*p - ' '][i];
+            else if (size == LED_SZIE_45)
+                char_ = ascii_0405[*p - ' '][i];
+            else
                 char_ = ascii_0408[*p - ' '][i];
 
             for (u8 bit = 0; bit < hight; bit++)
             {
-                idx_x = char_cnt + x + i;
                 idx_y = y + bit;
-                if (idx_x >= LED_COL || idx_y >= LED_ROW)
+                if (idx_y >= LED_ROW)
                     break;
 
                 if (char_ & (1 << bit))
@@ -50,11 +55,11 @@ void led_show_char(u32 (*leds)[8], u8 x, u8 y, u8 *p, u8 size, u32 fc, u32 bc, u
                 else
                 {
                     if (!mode)
-                        leds[x][y] = bc;
+                        leds[idx_x][idx_y] = bc;
                 }
             }
         }
         p++;
-        char_cnt += size;
+        char_cnt += width;
     }
 }

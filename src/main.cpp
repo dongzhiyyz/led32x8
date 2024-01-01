@@ -11,11 +11,14 @@
  *
  */
 
-#include "main.h"
 #include "font.h"
 
+const char api_weather_lives[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514";
+const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514&extensions=all";
+const char api_time[] = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
+
 // Define the array of leds
-CRGB leds[NUM_LEDS];
+CRGB leds[LED_NUM];
 u32 leds_data[LED_COL][LED_ROW];
 
 // void
@@ -31,9 +34,19 @@ void led_show()
     for (u16 j = 0; j < LED_ROW; j++)
     {
       if (i & 0x1)
-        leds[led_cnt] = leds_data[i][j];
+      {
+        if (LED_ROTATION)
+          leds[LED_NUM - 1 - led_cnt] = leds_data[i][LED_ROW - 1 - j];
+        else
+          leds[led_cnt] = leds_data[i][j];
+      }
       else
-        leds[led_cnt] = leds_data[i][LED_ROW - 1 - j];
+      {
+        if (LED_ROTATION)
+          leds[LED_NUM - 1 - led_cnt] = leds_data[i][j];
+        else
+          leds[led_cnt] = leds_data[i][LED_ROW - 1 - j];
+      }
       led_cnt++;
     }
   }
@@ -42,7 +55,7 @@ void led_show()
 
 void setup()
 {
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS); // GRB ordering is typical
+  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, LED_NUM); // GRB ordering is typical
   FastLED.setBrightness(5);
 }
 
@@ -53,49 +66,20 @@ void loop()
   {
     for (u16 j = 0; j < LED_ROW; j++)
     {
-      leds_data[i][j] = (u32)CRGB::Green;
+      leds_data[i][j] = 0;
     }
   }
 
-  // sprintf((char *)&text, "%d:%d", cnt, cnt);
-  // led_show_char(leds_data, 0, 0, text, 3);
+  sprintf((char *)&text, "%02d:%02d:%02d", cnt, cnt, cnt);
+  led_show_char(leds_data, 1, 2, text, LED_SZIE_45, (u32)CRGB::SkyBlue);
 
   led_show();
-  delay(200);
+  delay(1000);
 
-  for (u16 i = 0; i < LED_COL; i++)
-  {
-    for (u16 j = 0; j < LED_ROW; j++)
-    {
-      leds_data[i][j] = (u32)CRGB::Red;
-    }
-  }
-  led_show();
-  delay(200);
+
 
   cnt++;
+  if (cnt > 59)
+    cnt = 0;
 
-  // for (u16 i = 0; i < NUM_LEDS; i++)
-  // {
-
-  //   if ((i >> 3) & 0x01)
-  //     // leds[i] = leds_data[i];
-  //     leds[i] = leds_data[NUM_LEDS - i - 1];
-  //   else
-  //     // leds[((i >> 3) + 1) * 8 - (i % 8) - 1] = leds_data[i];
-  //     leds[((i >> 3) + 1) * 8 - (i % 8) - 1] = leds_data[NUM_LEDS - i - 1];
-  //   // leds[NUM_LEDS - i - 1] = leds_data[i];
-  // }
-
-  // Now turn the LED off, then pause
-  // for (u16 i = 0; i < NUM_LEDS; i++)
-  // {
-  //   leds[i] = CRGB::Black;
-  // }
-  // FastLED.show();
-  // delay(500);
-
-  // fill_rainbow(leds,NUM_LEDS,0,1);
-  // FastLED.show();
-  // delay(500);
 }
