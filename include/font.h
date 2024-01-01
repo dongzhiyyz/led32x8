@@ -11,7 +11,7 @@ typedef enum
 
 } led_size;
 
-void led_show_char(u32 (*leds)[8], u8 x, u8 y, u8 *p, led_size size, u32 fc = 0x01ffffff, u32 bc = 0, u8 mode = 0);
+void led_show_char(u32 (*leds)[8], u8 x, u8 y, char *p, led_size size, u32 fc = 0x01ffffff, u32 bc = 0, u8 mode = 0);
 
 const unsigned char ascii_0305[][3] = {
     {0x00, 0x00, 0x00}, /*" ",0*/
@@ -111,6 +111,7 @@ const unsigned char ascii_0305[][3] = {
     {0, 0, 0},          /*"~",94*/
 
 };
+
 const unsigned char ascii_0405[][4] = {
     {0x00, 0x00, 0x00, 0x00}, /*" ",0*/
     {0x00, 0x1d, 0x00, 0x00}, /*"!",1*/
@@ -228,7 +229,7 @@ const unsigned char ascii_0408[][4] = {
     {0x00, 0x01, 0x00, 0x00}, /*".",14*/
     {0x01, 0x06, 0x18, 0x60}, /*"/",15*/
     {0x3E, 0x41, 0x41, 0x3E}, /*"0",16*/
-    {0x21, 0x7F, 0x01, 0x00}, /*"1",17*/
+    {0x00, 0x21, 0x7F, 0x01}, /*"1",17*/
     {0x23, 0x45, 0x49, 0x31}, /*"2",18*/
     {0x22, 0x49, 0x49, 0x36}, /*"3",19*/
     {0x0E, 0x32, 0x7F, 0x02}, /*"4",20*/

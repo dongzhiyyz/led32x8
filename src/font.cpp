@@ -9,7 +9,7 @@
         mode:  0非叠加模式  1叠加模式
 返回值：  无
 ******************************************************************************/
-void led_show_char(u32 (*leds)[8], u8 x, u8 y, u8 *p, led_size size, u32 fc, u32 bc, u8 mode)
+void led_show_char(u32 (*leds)[8], u8 x, u8 y, char *p, led_size size, u32 fc, u32 bc, u8 mode)
 {
     if (x < 0 || x >= LED_COL)
         return;
