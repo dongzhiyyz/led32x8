@@ -11,38 +11,50 @@
 ******************************************************************************/
 void led_show_char(u32 (*leds)[8], u8 x, u8 y, u8 *p, u8 size, u32 fc, u32 bc, u8 mode)
 {
-    if (x < 0 || x >= 32)
+    if (x < 0 || x >= LED_COL)
         return;
-    if (y < 0 || y >= LED_RAW)
+    if (y < 0 || y >= LED_ROW)
         return;
 
-    u16 s = 0;
-    u8 num = 0;
+    u8 char_ = 0;
+    u8 hight = 0; // 字高
+    u8 char_cnt = 0;
+    u8 idx_x, idx_y = 0;
 
-    s = (x * 8 + y);
+    if (size == 3)
+        hight = 5;
+    else if (size == 4)
+        hight = 8;
+
     while (*p != '\0')
-    {
-        for (u8 i = 0; i < 4; i++)
+    {   
+        for (u8 i = 0; i < size; i++)
         {
-            num = ascii_0408[*p - ' '][i]; // 得到偏移后的值
-            for (u8 bit = 0; bit < 8; bit++)
+            if (size == 3)
+                char_ = ascii_0305[*p - ' '][i]; // 得到偏移后的值
+            else if (size == 4)
+                char_ = ascii_0408[*p - ' '][i];
+
+            for (u8 bit = 0; bit < hight; bit++)
             {
-                if (num & (1 << bit))
+                idx_x = char_cnt + x + i;
+                idx_y = y + bit;
+                if (idx_x >= LED_COL || idx_y >= LED_ROW)
+                    break;
+
+                if (char_ & (1 << bit))
                 {
                     if (fc != 0x01ffffff)
-                        leds[s + 8 * i + bit] = fc;
-                    // else
-                    // leds[x * 8 + y] = leds[x * 8 + y];
-                    // continue;
+                        leds[idx_x][idx_y] = fc;
                 }
                 else
                 {
                     if (!mode)
-                        leds[s + 8 * i + bit] = bc;
+                        leds[x][y] = bc;
                 }
             }
         }
         p++;
-        s += 32;
+        char_cnt += size;
     }
 }

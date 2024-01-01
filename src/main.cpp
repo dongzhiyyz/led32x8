@@ -8,23 +8,37 @@
  *   |
  *   |
  * (0,0)----------------------------------> x 31
- * 
-*/
-
-
+ *
+ */
 
 #include "main.h"
 #include "font.h"
 
-
 // Define the array of leds
 CRGB leds[NUM_LEDS];
-u32 leds_data[LED_COL][LED_RAW];
+u32 leds_data[LED_COL][LED_ROW];
 
 // void
 
 u8 text[20];
 u8 cnt = 0;
+
+void led_show()
+{
+  u16 led_cnt = 0;
+  for (u16 i = 0; i < LED_COL; i++)
+  {
+    for (u16 j = 0; j < LED_ROW; j++)
+    {
+      if (i & 0x1)
+        leds[led_cnt] = leds_data[i][j];
+      else
+        leds[led_cnt] = leds_data[i][LED_ROW - 1 - j];
+      led_cnt++;
+    }
+  }
+  FastLED.show();
+}
 
 void setup()
 {
@@ -37,25 +51,29 @@ void loop()
   // Turn the LED on, then pause
   for (u16 i = 0; i < LED_COL; i++)
   {
-    for (u16 j = 0; j < LED_RAW; j++)
+    for (u16 j = 0; j < LED_ROW; j++)
+    {
+      leds_data[i][j] = (u32)CRGB::Green;
+    }
+  }
+
+  // sprintf((char *)&text, "%d:%d", cnt, cnt);
+  // led_show_char(leds_data, 0, 0, text, 3);
+
+  led_show();
+  delay(200);
+
+  for (u16 i = 0; i < LED_COL; i++)
+  {
+    for (u16 j = 0; j < LED_ROW; j++)
     {
       leds_data[i][j] = (u32)CRGB::Red;
     }
   }
+  led_show();
+  delay(200);
 
-  sprintf((char *)&text, "%d:%d", cnt, cnt);
-  led_show_char(leds_data, 0, 0, text);
-
-  for (u16 i = 0; i < LED_COL; i++)
-  {
-    for (u16 j = 0; j < LED_RAW; j++)
-    {
-      if (i & 0x1)
-        leds[i] = leds_data[i][j];
-      else
-        leds[i] = leds_data[i][LED_RAW - 1 - j];
-    }
-  }
+  cnt++;
 
   // for (u16 i = 0; i < NUM_LEDS; i++)
   // {
@@ -69,8 +87,6 @@ void loop()
   //   // leds[NUM_LEDS - i - 1] = leds_data[i];
   // }
 
-  FastLED.show();
-  delay(100);
   // Now turn the LED off, then pause
   // for (u16 i = 0; i < NUM_LEDS; i++)
   // {
@@ -82,5 +98,4 @@ void loop()
   // fill_rainbow(leds,NUM_LEDS,0,1);
   // FastLED.show();
   // delay(500);
-  cnt++;
 }
