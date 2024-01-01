@@ -15,28 +15,48 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include "ArduinoJson.h"
+#include "soc/rtc_wdt.h" //设置看门狗用
 
 /********************************************************/
 
 void led_show();
-void timer_callback();
+void sys_timer_isr();
 s8 get_time();
 void show_real_time();
 
 /********************************************************/
+typedef enum
+{
+  sys_wifi_start,
+  sys_wifi_connecting,
+  sys_wifi_stadus,
+  sys_real_time,
+  sys_fft,
+
+  sys_err = 0xff,
+} SystemMode;
+
+/********************************************************/
+
+const u32 SYS_FREQ = 1000; // 10kHz
+hw_timer_t *sys_timer = NULL;
+volatile u8 sys_scheduling = 0;
+volatile u32 sys_cnt = 0;
+SystemMode sys_mode = sys_wifi_start;
+SystemMode sys_pre_mode = sys_mode;
 
 // WiFi
-u8 g_bConnecting = 0;
+u8 wifi_connecting = 0;
 
 // time_scheduling
-hw_timer_t *timer_real_time = NULL;
-volatile u8 time_scheduling = 0;
+// hw_timer_t *timer_real_time = NULL;
+// volatile u8 time_scheduling = 0;
 
 // Real-time
 time_t time_base = 0;
 time_t time_offset = 0;
-u32 update_time_cnt = 0;
-const u32 UPTIME_CNT_LIMIT = 86400; // 24h * 60 * 60
+u32 get_net_time_cnt = 0;                 // 获取网络时间cnt
+const u32 GET_NET_TIME_CNT_LIMIT = 86400; // 24h * 60 * 60
 
 const char api_weather_lives[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514";
 const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514&extensions=all";
@@ -59,13 +79,22 @@ void setup()
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, LED_NUM); // GRB ordering is typical
   FastLED.setBrightness(5);
 
-  // globle timer init
-  timer_real_time = timerBegin(0, 80, true);
-  timerAttachInterrupt(timer_real_time, &timer_callback, true);
-  timerAlarmWrite(timer_real_time, 1000000, true); // us
+  rtc_wdt_protect_off(); // 看门狗写保护关闭 关闭后可以喂狗
+  // rtc_wdt_protect_on();    // 看门狗写保护打开 打开后不能喂狗
+  // rtc_wdt_disable();       // 禁用看门狗
+  rtc_wdt_enable();                        // 启用看门狗
+  rtc_wdt_set_time(RTC_WDT_STAGE0, 10000); // 设置看门狗超时 10s.则reset重启
 
-  printf("这是一个WiFi yy13093z\n");
-  WiFi.begin("这是一个WiFi", "yy13093z");
+  // real timer init
+  // timer_real_time = timerBegin(1, 80, true);
+  // timerAttachInterrupt(timer_real_time, &timer_isr, true);
+  // timerAlarmWrite(timer_real_time, 1000000, true); // us
+
+  // sys timer init
+  sys_timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(sys_timer, &sys_timer_isr, true);
+  timerAlarmWrite(sys_timer, 1000000 / SYS_FREQ, true); // 100us 10kHz
+  timerAlarmEnable(sys_timer);
 }
 
 void loop()
@@ -79,33 +108,95 @@ void loop()
   //   }
   // }
 
-  if (WiFi.status() == WL_CONNECTED)
+  while (sys_scheduling)
   {
-    // LCD_Fill(0, 0, LCD_W, LCD_H, 0x79C2);
-    // LCD_WifiConnectOK();
-    // delay(1000);
-    // LCD_Fill(0, 0, LCD_W, LCD_H, BG_COLOR);
-    printf("wifi connect ok!\n");
-    g_bConnecting = 1;
-    time_scheduling = 1;
-    update_time_cnt = UPTIME_CNT_LIMIT;
-    // update_weather_count = UPWEATHER_CNT_LIMIT;
-    // update_time_count = UPTIME_CNT_LIMIT - 3;
-    // update_weather2_count = UPTIME_CNT_LIMIT - 6;
-    // u8 aa[] = "天气预报";
-    // LCD_Fill(0, 0, LCD_W, LCD_H, 0x0000);
-    // LCD_ShowChinese(20, 50, aa, 0x1234, 0x4567, 16);
-    timerAlarmEnable(timer_real_time);
-    while (1)
+    rtc_wdt_feed(); // 喂狗函数
+    sys_scheduling = 0;
+    if (sys_pre_mode != sys_mode)
     {
-      if (time_scheduling)
+      printf("sys_mode change!, now mode is: %d\n", sys_mode);
+      sys_pre_mode = sys_mode;
+      sys_cnt = 0;
+    }
+
+    switch (sys_mode)
+    {
+    case sys_wifi_start:
+      printf("这是一个WiFi yy13093z\n");
+      wifi_connecting = 1;
+      WiFi.begin("这是一个WiFi", "yy13093z");
+      sys_mode = sys_wifi_connecting;
+      break;
+
+    case sys_wifi_connecting:
+      switch (WiFi.status())
       {
-        time_scheduling = 0;
-        // sprintf(led_show_text, "%04d:", update_time_cnt);
-        // led_show_char(leds_data, 1, 2, led_show_text, LED_SZIE_45, (u32)CRGB::SkyBlue);
+      case WL_CONNECTED:
+        log_printf("wifi connect ok!\n");
+        sys_mode = sys_wifi_stadus;
+        wifi_connecting = 0;
+        break;
+
+      case WL_CONNECT_FAILED:
+        printf("wifi connect ng!\n");
+        sys_mode = sys_wifi_stadus;
+        wifi_connecting = 0;
+        break;
+      }
+
+      if (sys_cnt > SYS_FREQ * 10) // time out 10s
+      {
+        printf("wifi connect time out!\n");
+        sys_mode = sys_wifi_stadus;
+        WiFi.disconnect(true);
+        wifi_connecting = 0;
+      }
+      break;
+
+    case sys_wifi_stadus:
+      if (WiFi.status() == WL_CONNECTED)
+      {
+        // show ok log
+      }
+      else
+      {
+        // show ng log
+      }
+      if (sys_cnt > SYS_FREQ * 2)
+      {
+        if (WiFi.status() == WL_CONNECTED)
+        {
+          get_net_time_cnt = GET_NET_TIME_CNT_LIMIT;
+          sys_mode = sys_real_time;
+        }
+        else
+          sys_mode = sys_fft;
+      }
+      break;
+
+    case sys_real_time:
+      if (sys_cnt > SYS_FREQ * 1)
+      {
+        time_offset++;
+        get_net_time_cnt++;
+        sys_cnt = 0;
         show_real_time();
         led_show();
       }
+      break;
+
+    case sys_fft:
+
+      break;
+
+    case sys_err:
+      printf("sys err! restart");
+      ESP.restart();
+      break;
+
+    default:
+      sys_mode = sys_err;
+      break;
     }
   }
 }
@@ -137,11 +228,10 @@ void led_show()
   FastLED.show();
 }
 
-void timer_callback()
+void ARDUINO_ISR_ATTR sys_timer_isr()
 {
-  time_offset++;
-  update_time_cnt++;
-  time_scheduling = 1;
+  sys_cnt++;
+  sys_scheduling++;
 }
 
 s8 get_time()
@@ -190,46 +280,31 @@ s8 get_time()
 
 void show_real_time()
 {
-  if (update_time_cnt >= UPTIME_CNT_LIMIT)
+  if (get_net_time_cnt >= GET_NET_TIME_CNT_LIMIT)
   {
-    if (!g_bConnecting)
+    if (!wifi_connecting)
     {
       WiFi.begin();
-      g_bConnecting = 1;
+      wifi_connecting = 1;
     }
+
     if (WiFi.status() == WL_CONNECTED)
     {
-      g_bConnecting = 0;
-      update_time_cnt = 0;
-      // {
-      //   LCD_Fill(20, 88, LCD_W, LCD_H, BG_COLOR);
-      //   for (u8 i = 1; i < 4; i++)
-      //   {
-      //     String date = forecastInfo["casts"][i]["date"];
-      //     String dayweather = forecastInfo["casts"][i]["dayweather"];
-      //     String daytemp = forecastInfo["casts"][i]["daytemp"];
-      //     date = date.substring(5);
-      //     daytemp += "°";
-      //     LCD_ShowString(75 + i * 13, 20, date.c_str(), 0x5555, 0x8888, 12, 1);
-      //     LCD_ShowChinese(75 + i * 13, 60, dayweather.c_str(), 0x5555, 0x8888, 12, 1);
-      //     LCD_ShowString(75 + i * 13, 100, daytemp.c_str(), 0x5555, 0x8888, 12, 1);
-      //   }
-      // }
+      time_offset = 0;
+      wifi_connecting = 0;
+      get_net_time_cnt = 0;
 
       printf("get time\n");
-      // update_time_count = 0;
-      time_offset = 0;
       get_time();
       if (WiFi.disconnect(true))
         printf("close wifi ok\n");
       else
         printf("close wifi ng\n");
     }
-
     else if (WiFi.status() == WL_CONNECT_FAILED)
     {
-      g_bConnecting = 0;
-      update_time_cnt = 0;
+      wifi_connecting = 0;
+      get_net_time_cnt = 0;
     }
   }
 
