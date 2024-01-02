@@ -38,7 +38,7 @@ typedef enum
 
 /********************************************************/
 
-const u32 SYS_FREQ = 1000; // 10kHz
+const u32 SYS_FREQ = 10000; // 10kHz
 hw_timer_t *sys_timer = NULL;
 volatile u8 sys_scheduling = 0;
 volatile u32 sys_cnt = 0;
@@ -79,16 +79,12 @@ void setup()
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, LED_NUM); // GRB ordering is typical
   FastLED.setBrightness(5);
 
+  // 看门狗 init
   rtc_wdt_protect_off(); // 看门狗写保护关闭 关闭后可以喂狗
   // rtc_wdt_protect_on();    // 看门狗写保护打开 打开后不能喂狗
   // rtc_wdt_disable();       // 禁用看门狗
   rtc_wdt_enable();                        // 启用看门狗
   rtc_wdt_set_time(RTC_WDT_STAGE0, 10000); // 设置看门狗超时 10s.则reset重启
-
-  // real timer init
-  // timer_real_time = timerBegin(1, 80, true);
-  // timerAttachInterrupt(timer_real_time, &timer_isr, true);
-  // timerAlarmWrite(timer_real_time, 1000000, true); // us
 
   // sys timer init
   sys_timer = timerBegin(0, 80, true);
@@ -114,7 +110,7 @@ void loop()
     sys_scheduling = 0;
     if (sys_pre_mode != sys_mode)
     {
-      printf("sys_mode change!, now mode is: %d\n", sys_mode);
+      printf("sys_mode change! now mode is: %d\n", sys_mode);
       sys_pre_mode = sys_mode;
       sys_cnt = 0;
     }
@@ -122,7 +118,7 @@ void loop()
     switch (sys_mode)
     {
     case sys_wifi_start:
-      printf("这是一个WiFi yy13093z\n");
+      printf("\n这是一个WiFi yy13093z\n");
       wifi_connecting = 1;
       WiFi.begin("这是一个WiFi", "yy13093z");
       sys_mode = sys_wifi_connecting;
@@ -132,7 +128,7 @@ void loop()
       switch (WiFi.status())
       {
       case WL_CONNECTED:
-        log_printf("wifi connect ok!\n");
+        printf("wifi connect ok!\n");
         sys_mode = sys_wifi_stadus;
         wifi_connecting = 0;
         break;
@@ -175,11 +171,11 @@ void loop()
       break;
 
     case sys_real_time:
-      if (sys_cnt > SYS_FREQ * 1)
+      if (sys_cnt >= SYS_FREQ * 1)
       {
+        sys_cnt = 1;
         time_offset++;
         get_net_time_cnt++;
-        sys_cnt = 0;
         show_real_time();
         led_show();
       }
@@ -199,6 +195,12 @@ void loop()
       break;
     }
   }
+}
+
+void ARDUINO_ISR_ATTR sys_timer_isr()
+{
+  sys_cnt++;
+  sys_scheduling++;
 }
 
 void led_show()
@@ -228,10 +230,54 @@ void led_show()
   FastLED.show();
 }
 
-void ARDUINO_ISR_ATTR sys_timer_isr()
+void show_real_time()
 {
-  sys_cnt++;
-  sys_scheduling++;
+  if (get_net_time_cnt >= GET_NET_TIME_CNT_LIMIT)
+  {
+    if (!wifi_connecting && WiFi.status() != WL_CONNECTED)
+    {
+      printf("wifi connnect start...\n");
+      wifi_connecting = 1;
+      WiFi.begin();
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      printf("wifi connect ok!\n");
+      printf("get network time...\n");
+
+      wifi_connecting = 0;
+      get_net_time_cnt = 0;
+      if (!get_time())
+      {
+        time_offset = 0;
+        printf("get network time ok!\n");
+      }
+
+      if (WiFi.disconnect(true))
+        printf("close wifi ok\n");
+      else
+        printf("close wifi ng\n");
+    }
+
+    else if (WiFi.status() == WL_CONNECT_FAILED)
+    {
+      wifi_connecting = 0;
+      get_net_time_cnt = 0;
+    }
+  }
+
+  // printf("show time start\n");
+  static time_t real_t;
+  static struct tm *p_time;
+
+  real_t = time_base + time_offset;
+  p_time = localtime(&real_t);
+  strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
+  // led_show_char(leds_data, 1, 2, led_show_text, LED_SZIE_45, (u32)CRGB::SkyBlue);
+  led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::LightBlue);
+  // printf("show time ok\n");
+  // printf("time_base: %d, time_offset: %d\n", time_base, time_offset);
 }
 
 s8 get_time()
@@ -276,47 +322,4 @@ s8 get_time()
   }
   http.end(); // 结束当前连接
   return ok;
-}
-
-void show_real_time()
-{
-  if (get_net_time_cnt >= GET_NET_TIME_CNT_LIMIT)
-  {
-    if (!wifi_connecting)
-    {
-      WiFi.begin();
-      wifi_connecting = 1;
-    }
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-      time_offset = 0;
-      wifi_connecting = 0;
-      get_net_time_cnt = 0;
-
-      printf("get time\n");
-      get_time();
-      if (WiFi.disconnect(true))
-        printf("close wifi ok\n");
-      else
-        printf("close wifi ng\n");
-    }
-    else if (WiFi.status() == WL_CONNECT_FAILED)
-    {
-      wifi_connecting = 0;
-      get_net_time_cnt = 0;
-    }
-  }
-
-  // printf("show time start\n");
-  static time_t real_t;
-  static struct tm *p_time;
-
-  real_t = time_base + time_offset;
-  p_time = localtime(&real_t);
-  strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
-  // led_show_char(leds_data, 1, 2, led_show_text, LED_SZIE_45, (u32)CRGB::SkyBlue);
-  led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::SkyBlue);
-  // printf("show time ok\n");
-  // printf("time_base: %d, time_offset: %d\n", time_base, time_offset);
 }
