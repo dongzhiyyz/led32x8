@@ -20,5 +20,25 @@ typedef int32_t s32;
 #define LED_ROTATION  1
 
 
+typedef enum
+{
+  SYS_WIFI_START,
+  SYS_WIFI_CONNECTING,
+  SYS_WIFI_STADUS,
+  SYS_REAL_TIME,
+  SYS_FFT,
+
+  SYS_ERR = 0xff,
+} sys_mode_t;
+
+typedef enum
+{
+  WIFI_CONNECTING,
+  WIFI_CONNECTED,
+  WIFI_CONNECT_FAILED,
+  WIFI_IDLE,
+} wifi_sts_t;
+
+
 
 #endif //__MAIN_H__
