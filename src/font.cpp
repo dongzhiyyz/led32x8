@@ -37,7 +37,11 @@ void led_show_char(u32 (*leds)[8], u8 x, u8 y, char *p, led_size size, u32 fc, u
             if (size == LED_SZIE_35)
                 char_ = ascii_0305[*p - ' '][i];
             else if (size == LED_SZIE_45)
+            {
+                if (*p == ':' && (i == 0 || i == 2))
+                    i += 1;
                 char_ = ascii_0405[*p - ' '][i];
+            }
             else
                 char_ = ascii_0408[*p - ' '][i];
 
@@ -59,7 +63,10 @@ void led_show_char(u32 (*leds)[8], u8 x, u8 y, char *p, led_size size, u32 fc, u
                 }
             }
         }
+        if (*p == ':' && size == LED_SZIE_45)
+            char_cnt += width >> 1;
+        else
+            char_cnt += width;
         p++;
-        char_cnt += width;
     }
 }

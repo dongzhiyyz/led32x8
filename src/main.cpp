@@ -11,8 +11,6 @@
  *
  */
 
-#define FASTLED_INTERNAL
-
 #include "font.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -24,15 +22,14 @@
 void sys_timer_isr();
 void led_show();
 void show_real_time();
-s8 get_time();
+s8 get_real_time();
 wifi_sts_t wifi_connect();
 bool wifi_disconnect();
+u32 intToRGB(u32 value);
 
 /********************************************************/
 
-/********************************************************/
-
-const u32 SYS_FREQ = 10000; // 10kHz
+const u32 SYS_FREQ = 1000; // 1kHz
 hw_timer_t *sys_timer = NULL;
 volatile u8 sys_scheduling = 0;
 volatile u32 sys_cnt = 0;
@@ -79,7 +76,7 @@ void setup()
   // rtc_wdt_protect_on();    // 看门狗写保护打开 打开后不能喂狗
   // rtc_wdt_disable();       // 禁用看门狗
   rtc_wdt_enable();                        // 启用看门狗
-  rtc_wdt_set_time(RTC_WDT_STAGE0, 10000); // 设置看门狗超时 10s.则reset重启
+  rtc_wdt_set_time(RTC_WDT_STAGE0, 1000); // 设置看门狗超时 1s.则reset重启
 
   // sys timer init
   sys_timer = timerBegin(0, 80, true);
@@ -103,6 +100,7 @@ void loop()
   {
     rtc_wdt_feed(); // 喂狗函数
     sys_scheduling = 0;
+
     if (sys_pre_mode != sys_mode)
     {
       printf("sys mode change,running mode: %d\n", sys_mode);
@@ -165,7 +163,7 @@ void loop()
     case SYS_REAL_TIME:
       if (sys_cnt >= SYS_FREQ * 1)
       {
-        sys_cnt = 1;
+        sys_cnt = 0;
         time_offset++;
         get_net_time_cnt++;
         show_real_time();
@@ -231,7 +229,7 @@ void show_real_time()
     {
       get_net_time_cnt = 0;
       printf("get network time...\n");
-      if (!get_time())
+      if (!get_real_time())
       {
         time_offset = 0;
         printf("get network time ok!\n");
@@ -252,13 +250,15 @@ void show_real_time()
   real_t = time_base + time_offset;
   p_time = localtime(&real_t);
   strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
-  // led_show_char(leds_data, 1, 2, led_show_text, LED_SZIE_45, (u32)CRGB::SkyBlue);
-  led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::LightBlue);
+  led_show_char(leds_data, 2, 2, led_show_text, LED_SZIE_45, intToRGB((u32)(time_offset * 194)));
+  printf("real time %s\n", led_show_text);
+  
+  // led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::MediumBlue);
   // printf("show time ok\n");
   // printf("time_base: %d, time_offset: %d\n", time_base, time_offset);
 }
 
-s8 get_time()
+s8 get_real_time()
 {
   s8 ok = 0;
   HTTPClient http; // 声明HTTPClient对象
@@ -344,4 +344,47 @@ bool wifi_disconnect()
     printf("close wifi ng\n");
 
   return res;
+}
+
+
+u32 intToRGB(u32 value) {
+  value = value & 0xffffff;
+  double hue = (double)value / 16777215.0;
+  double saturation = 1.0;
+  double brightness = 1.0;
+
+  // HSV to RGB conversion
+  double c = brightness * saturation;
+  double x = c * (1 - fabs(fmod(hue * 6, 2) - 1));
+  double m = brightness - c;
+
+  double red, green, blue;
+  if (hue < 1.0 / 6.0)
+  {
+    red = c;
+    green = x;
+    blue = 0;
+    } else if (hue < 2.0 / 6.0) {
+        red = x;
+        green = c;
+        blue = 0;
+    } else if (hue < 3.0 / 6.0) {
+        red = 0;
+        green = c;
+        blue = x;
+    } else if (hue < 4.0 / 6.0) {
+        red = 0;
+        green = x;
+        blue = c;
+    } else if (hue < 5.0 / 6.0) {
+        red = x;
+        green = 0;
+        blue = c;
+    } else {
+        red = c;
+        green = 0;
+        blue = x;
+    }
+
+    return (u32)((red + m) * 255) << 16 | (u32)((green + m) * 255) << 8 | (u32)((blue + m) * 255);
 }

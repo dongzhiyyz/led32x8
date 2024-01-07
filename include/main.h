@@ -2,6 +2,8 @@
 #define __MAIN_H__
 
 
+#define FASTLED_INTERNAL
+
 #include <FastLED.h>
 
 
