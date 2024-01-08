@@ -15,11 +15,11 @@ typedef int16_t s16;
 typedef int32_t s32;
 
 
-#define LED_ROW 8
-#define LED_COL 32
-#define LED_NUM (LED_ROW * LED_COL)
-#define DATA_PIN 23
-#define LED_ROTATION  1
+const u8 LED_ROW      = 8;
+const u8 LED_COL      = 32;
+const u16 LED_NUM     = LED_ROW * LED_COL;
+const u8 DATA_PIN     = 23;
+const u8 LED_ROTATION = 1;
 
 
 typedef enum

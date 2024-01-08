@@ -70,3 +70,24 @@ void led_show_char(u32 (*leds)[8], u8 x, u8 y, char *p, led_size size, u32 fc, u
         p++;
     }
 }
+
+void led_show_pattern(u32 (*leds)[8], const pattern *src, u8 x, u8 y, u32 fc, u32 bc)
+{
+    u16 idx = 0;
+    u8 col = min(src->col, LED_COL);
+    u8 row = min(src->row, LED_ROW);
+
+    for (u8 i = x; i < col; i++)
+    {
+        for (u8 j = y; j < row; j++)
+        {
+            if (fc != 0x01ffffff && src->dat[idx] != 0)
+                leds[i][j] = fc;
+            else if (bc != 0 && src->dat[idx] == 0)
+                leds[i][j] = bc;
+            else
+                leds[i][j] = src->dat[idx];
+            idx++;
+        }
+    }
+}

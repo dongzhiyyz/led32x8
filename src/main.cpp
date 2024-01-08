@@ -21,6 +21,7 @@
 
 void sys_timer_isr();
 void led_show();
+void led_clear();
 void show_real_time();
 s8 get_real_time();
 wifi_sts_t wifi_connect();
@@ -75,7 +76,7 @@ void setup()
   rtc_wdt_protect_off(); // 看门狗写保护关闭 关闭后可以喂狗
   // rtc_wdt_protect_on();    // 看门狗写保护打开 打开后不能喂狗
   // rtc_wdt_disable();       // 禁用看门狗
-  rtc_wdt_enable();                        // 启用看门狗
+  rtc_wdt_enable();                       // 启用看门狗
   rtc_wdt_set_time(RTC_WDT_STAGE0, 1000); // 设置看门狗超时 1s.则reset重启
 
   // sys timer init
@@ -120,6 +121,16 @@ void loop()
       {
       case WIFI_CONNECTING:
         // show logo
+        if (sys_cnt % (int)(SYS_FREQ * 0.5) == 0)
+        {
+          led_show_pattern(leds_data, &pattern_wifi_connecting1);
+          led_show();
+        }
+        else if (sys_cnt % (SYS_FREQ * 1) == 0)
+        {
+          led_show_pattern(leds_data, &pattern_wifi_connecting2);
+          led_show();
+        }
         break;
 
       case WIFI_CONNECTED:
@@ -143,11 +154,30 @@ void loop()
       if (wifi_connect() == WIFI_CONNECTED)
       {
         // show ok logo
+        if (sys_cnt % (int)(SYS_FREQ * 0.5) == 0)
+        {
+          led_show_pattern(leds_data, &pattern_wifi_connect_ok);
+          led_show();
+        }
+        else if (sys_cnt % (SYS_FREQ * 1) == 0)
+        {
+          led_clear();
+        }
       }
       else
       {
         // show ng logo
+        if (sys_cnt % (int)(SYS_FREQ * 0.5) == 0)
+        {
+          led_show_pattern(leds_data, &pattern_wifi_connect_ng);
+          led_show();
+        }
+        else if (sys_cnt % (SYS_FREQ * 1) == 0)
+        {
+          led_clear();
+        }
       }
+
       if (sys_cnt > SYS_FREQ * 2)
       {
         if (wifi_connect() == WIFI_CONNECTED)
@@ -158,6 +188,7 @@ void loop()
         else
           sys_mode = SYS_FFT;
       }
+      
       break;
 
     case SYS_REAL_TIME:
@@ -220,6 +251,18 @@ void led_show()
   FastLED.show();
 }
 
+void led_clear()
+{
+  for (u8 i = 0; i < LED_COL; i++)
+  {
+    for (u8 j = 0; j < LED_COL; j++)
+    {
+      leds_data[i][j] = 0;
+    }
+  }
+  led_show();
+}
+
 void show_real_time()
 {
   if (get_net_time_cnt >= GET_NET_TIME_CNT_LIMIT)
@@ -252,7 +295,7 @@ void show_real_time()
   strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
   led_show_char(leds_data, 2, 2, led_show_text, LED_SZIE_45, intToRGB((u32)(time_offset * 194)));
   printf("real time %s\n", led_show_text);
-  
+
   // led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::MediumBlue);
   // printf("show time ok\n");
   // printf("time_base: %d, time_offset: %d\n", time_base, time_offset);
@@ -346,8 +389,8 @@ bool wifi_disconnect()
   return res;
 }
 
-
-u32 intToRGB(u32 value) {
+u32 intToRGB(u32 value)
+{
   value = value & 0xffffff;
   double hue = (double)value / 16777215.0;
   double saturation = 1.0;
@@ -364,27 +407,37 @@ u32 intToRGB(u32 value) {
     red = c;
     green = x;
     blue = 0;
-    } else if (hue < 2.0 / 6.0) {
-        red = x;
-        green = c;
-        blue = 0;
-    } else if (hue < 3.0 / 6.0) {
-        red = 0;
-        green = c;
-        blue = x;
-    } else if (hue < 4.0 / 6.0) {
-        red = 0;
-        green = x;
-        blue = c;
-    } else if (hue < 5.0 / 6.0) {
-        red = x;
-        green = 0;
-        blue = c;
-    } else {
-        red = c;
-        green = 0;
-        blue = x;
-    }
+  }
+  else if (hue < 2.0 / 6.0)
+  {
+    red = x;
+    green = c;
+    blue = 0;
+  }
+  else if (hue < 3.0 / 6.0)
+  {
+    red = 0;
+    green = c;
+    blue = x;
+  }
+  else if (hue < 4.0 / 6.0)
+  {
+    red = 0;
+    green = x;
+    blue = c;
+  }
+  else if (hue < 5.0 / 6.0)
+  {
+    red = x;
+    green = 0;
+    blue = c;
+  }
+  else
+  {
+    red = c;
+    green = 0;
+    blue = x;
+  }
 
-    return (u32)((red + m) * 255) << 16 | (u32)((green + m) * 255) << 8 | (u32)((blue + m) * 255);
+  return (u32)((red + m) * 255) << 16 | (u32)((green + m) * 255) << 8 | (u32)((blue + m) * 255);
 }
