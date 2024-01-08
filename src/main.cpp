@@ -20,6 +20,7 @@
 /********************************************************/
 
 void sys_timer_isr();
+bool sys_interval_decision(u16 cycle_ms, u16 sys_ms);
 void led_show();
 void led_clear();
 void show_real_time();
@@ -121,12 +122,12 @@ void loop()
       {
       case WIFI_CONNECTING:
         // show logo
-        if (sys_cnt % (int)(SYS_FREQ * 0.5) == 0)
+        if (sys_interval_decision(1000, 0))
         {
           led_show_pattern(leds_data, &pattern_wifi_connecting1);
           led_show();
         }
-        else if (sys_cnt % (SYS_FREQ * 1) == 0)
+        else if (sys_interval_decision(1000, 500) && sys_cnt !=0)
         {
           led_show_pattern(leds_data, &pattern_wifi_connecting2);
           led_show();
@@ -154,12 +155,12 @@ void loop()
       if (wifi_connect() == WIFI_CONNECTED)
       {
         // show ok logo
-        if (sys_cnt % (int)(SYS_FREQ * 0.5) == 0)
+        if (sys_interval_decision(1000, 0))
         {
           led_show_pattern(leds_data, &pattern_wifi_connect_ok);
           led_show();
         }
-        else if (sys_cnt % (SYS_FREQ * 1) == 0)
+        else if (sys_interval_decision(1000, 500) && sys_cnt !=0)
         {
           led_clear();
         }
@@ -167,12 +168,12 @@ void loop()
       else
       {
         // show ng logo
-        if (sys_cnt % (int)(SYS_FREQ * 0.5) == 0)
+        if (sys_interval_decision(1000, 0))
         {
           led_show_pattern(leds_data, &pattern_wifi_connect_ng);
           led_show();
         }
-        else if (sys_cnt % (SYS_FREQ * 1) == 0)
+        else if (sys_interval_decision(1000, 500) && sys_cnt !=0)
         {
           led_clear();
         }
@@ -188,7 +189,7 @@ void loop()
         else
           sys_mode = SYS_FFT;
       }
-      
+
       break;
 
     case SYS_REAL_TIME:
@@ -222,6 +223,11 @@ void ARDUINO_ISR_ATTR sys_timer_isr()
 {
   sys_cnt++;
   sys_scheduling++;
+}
+
+bool sys_interval_decision(u16 cycle_ms, u16 ofs_ms)
+{
+  return ((sys_cnt * 1000) % (SYS_FREQ * (cycle_ms + ofs_ms)) == 0);
 }
 
 void led_show()
