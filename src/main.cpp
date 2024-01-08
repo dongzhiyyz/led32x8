@@ -38,6 +38,10 @@ volatile u32 sys_cnt = 0;
 sys_mode_t sys_mode = SYS_WIFI_START;
 sys_mode_t sys_pre_mode = sys_mode;
 
+const u16 SYS_INTERVAL_0 = 700;
+const u16 SYS_INTERVAL_OFS_0 = SYS_INTERVAL_0 >> 1;
+
+
 // WiFi
 char wifi_ssid[32] = "这是一个WiFi";
 char wifi_pass[32] = "yy13093z";
@@ -79,6 +83,9 @@ void setup()
   // rtc_wdt_disable();       // 禁用看门狗
   rtc_wdt_enable();                       // 启用看门狗
   rtc_wdt_set_time(RTC_WDT_STAGE0, 1000); // 设置看门狗超时 1s.则reset重启
+
+  //adc init
+  
 
   // sys timer init
   sys_timer = timerBegin(0, 80, true);
@@ -122,12 +129,12 @@ void loop()
       {
       case WIFI_CONNECTING:
         // show logo
-        if (sys_interval_decision(1000, 0))
+        if (sys_interval_decision(SYS_INTERVAL_0, 0))
         {
           led_show_pattern(leds_data, &pattern_wifi_connecting1);
           led_show();
         }
-        else if (sys_interval_decision(1000, 500) && sys_cnt !=0)
+        else if (sys_interval_decision(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
         {
           led_show_pattern(leds_data, &pattern_wifi_connecting2);
           led_show();
@@ -155,12 +162,12 @@ void loop()
       if (wifi_connect() == WIFI_CONNECTED)
       {
         // show ok logo
-        if (sys_interval_decision(1000, 0))
+        if (sys_interval_decision(SYS_INTERVAL_0, 0))
         {
           led_show_pattern(leds_data, &pattern_wifi_connect_ok);
           led_show();
         }
-        else if (sys_interval_decision(1000, 500) && sys_cnt !=0)
+        else if (sys_interval_decision(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
         {
           led_clear();
         }
@@ -168,19 +175,20 @@ void loop()
       else
       {
         // show ng logo
-        if (sys_interval_decision(1000, 0))
+        if (sys_interval_decision(SYS_INTERVAL_0, 0))
         {
           led_show_pattern(leds_data, &pattern_wifi_connect_ng);
           led_show();
         }
-        else if (sys_interval_decision(1000, 500) && sys_cnt !=0)
+        else if (sys_interval_decision(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0) && sys_cnt != 0)
         {
           led_clear();
         }
       }
 
-      if (sys_cnt > SYS_FREQ * 2)
+      if (sys_cnt > SYS_FREQ * 2.5)
       {
+        led_clear();
         if (wifi_connect() == WIFI_CONNECTED)
         {
           get_net_time_cnt = GET_NET_TIME_CNT_LIMIT;
@@ -227,7 +235,7 @@ void ARDUINO_ISR_ATTR sys_timer_isr()
 
 bool sys_interval_decision(u16 cycle_ms, u16 ofs_ms)
 {
-  return ((sys_cnt * 1000) % (SYS_FREQ * (cycle_ms + ofs_ms)) == 0);
+  return ((sys_cnt * 1000) % (SYS_FREQ * cycle_ms) == ofs_ms * 1000);
 }
 
 void led_show()
@@ -261,7 +269,7 @@ void led_clear()
 {
   for (u8 i = 0; i < LED_COL; i++)
   {
-    for (u8 j = 0; j < LED_COL; j++)
+    for (u8 j = 0; j < LED_ROW; j++)
     {
       leds_data[i][j] = 0;
     }

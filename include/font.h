@@ -12,8 +12,8 @@ typedef enum
 } led_size;
 
 typedef struct{
-    u8 row;
     u8 col;
+    u8 row;
     u32 dat[];
 } pattern;
 
