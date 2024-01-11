@@ -11,6 +11,7 @@
  *
  */
 
+#include "api_id.h"
 #include "font.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -58,8 +59,8 @@ time_t time_offset                = 0;
 u32    get_net_time_cnt           = 0;      // 获取网络时间cnt
 const  u32 GET_NET_TIME_CNT_LIMIT = 86400;  // 24h * 60 * 60
 
-const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514";
-const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514&extensions=all";
+const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=";
+const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=&extensions=all";
 const char api_time[]             = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
 
 
