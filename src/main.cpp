@@ -16,6 +16,7 @@
 #include <HTTPClient.h>
 #include "ArduinoJson.h"
 #include "soc/rtc_wdt.h" //设置看门狗用
+#include "arduinoFFT.h"
 
 /********************************************************/
 
@@ -27,20 +28,21 @@ void show_real_time();
 s8 get_real_time();
 wifi_sts_t wifi_connect();
 bool wifi_disconnect();
-u32 intToRGB(u32 value);
+u32 int2rgb(u32 value);
+void adc_timer_isr();
+void drawBar(u16 idx, s16 value, u8 *flag); // 绘制函数，按序号和幅度值绘制条形块
 
 /********************************************************/
 
-const u32 SYS_FREQ = 1000; // 1kHz
-hw_timer_t *sys_timer = NULL;
-volatile u8 sys_scheduling = 0;
-volatile u32 sys_cnt = 0;
-sys_mode_t sys_mode = SYS_WIFI_START;
-sys_mode_t sys_pre_mode = sys_mode;
+const      u32 SYS_FREQ      = 1000;            // 1kHz
+hw_timer_t *sys_timer        = NULL;
+volatile   u8 sys_scheduling = 0;
+volatile   u32 sys_cnt       = 0;
+sys_mode_t sys_mode          = SYS_WIFI_START;
+sys_mode_t sys_pre_mode      = sys_mode;
 
-const u16 SYS_INTERVAL_0 = 700;
+const u16 SYS_INTERVAL_0 = 600;
 const u16 SYS_INTERVAL_OFS_0 = SYS_INTERVAL_0 >> 1;
-
 
 // WiFi
 char wifi_ssid[32] = "这是一个WiFi";
@@ -51,21 +53,33 @@ char wifi_pass[32] = "yy13093z";
 // volatile u8 time_scheduling = 0;
 
 // Real-time
-time_t time_base = 0;
-time_t time_offset = 0;
-u32 get_net_time_cnt = 0;                 // 获取网络时间cnt
-const u32 GET_NET_TIME_CNT_LIMIT = 86400; // 24h * 60 * 60
+time_t time_base                  = 0;
+time_t time_offset                = 0;
+u32    get_net_time_cnt           = 0;      // 获取网络时间cnt
+const  u32 GET_NET_TIME_CNT_LIMIT = 86400;  // 24h * 60 * 60
 
-const char api_weather_lives[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514";
+const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514";
 const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=59c271adfce4a653f2629d54de1ac514&extensions=all";
-const char api_time[] = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
+const char api_time[]             = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
 
-/********************************************************/
 
 // Define the array of leds
 char led_show_text[20];
 CRGB leds[LED_NUM];
 u32 leds_data[LED_COL][LED_ROW];
+
+// ADC FFT
+const u8 ADC_CHANNEL  = 4;
+const u16 ADC_FREQ    = 8000;                 // Hz, 声音采样频率
+const u16 ADC_SAMPLES = 4 * LED_COL;          // 采样点数，必须为2的整数次幂
+const float FFT_FPS   = SYS_FREQ * 1.0 / 30;  // 30fps
+
+double fftReal[ADC_SAMPLES]; // FFT采样输入样本数组
+double fftImag[ADC_SAMPLES]; // FFT运算输出数组
+hw_timer_t *adc_timer = NULL;
+arduinoFFT FFT        = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, ADC_FREQ);  // 创建FFT对象
+u16        adc_cnt    = 0;
+u8         fft_flag   = 0;
 
 /********************************************************/
 
@@ -84,8 +98,12 @@ void setup()
   rtc_wdt_enable();                       // 启用看门狗
   rtc_wdt_set_time(RTC_WDT_STAGE0, 1000); // 设置看门狗超时 1s.则reset重启
 
-  //adc init
-  
+  // adc init
+  pinMode(ADC_CHANNEL, INPUT); // 初始化麦克风接口为输入模式，表示读取麦克风数据
+  adc_timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(adc_timer, &adc_timer_isr, true);
+  timerAlarmWrite(adc_timer, 1000000 / ADC_FREQ, true);
+  timerAlarmDisable(adc_timer);
 
   // sys timer init
   sys_timer = timerBegin(0, 80, true);
@@ -96,15 +114,6 @@ void setup()
 
 void loop()
 {
-  // Turn the LED on, then pause
-  // for (u16 i = 0; i < LED_COL; i++)
-  // {
-  //   for (u16 j = 0; j < LED_ROW; j++)
-  //   {
-  //     leds_data[i][j] = 0;
-  //   }
-  // }
-
   while (sys_scheduling)
   {
     rtc_wdt_feed(); // 喂狗函数
@@ -120,21 +129,29 @@ void loop()
     switch (sys_mode)
     {
     case SYS_WIFI_START:
+    {
       wifi_connect();
       sys_mode = SYS_WIFI_CONNECTING;
       break;
+    }
 
     case SYS_WIFI_CONNECTING:
+    {
       switch (wifi_connect())
       {
       case WIFI_CONNECTING:
         // show logo
         if (sys_interval_decision(SYS_INTERVAL_0, 0))
         {
+          led_show_pattern(leds_data, &pattern_wifi_connecting3);
+          led_show();
+        }
+        else if (sys_interval_decision(SYS_INTERVAL_0, 200))
+        {
           led_show_pattern(leds_data, &pattern_wifi_connecting1);
           led_show();
         }
-        else if (sys_interval_decision(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
+        else if (sys_interval_decision(SYS_INTERVAL_0, 400))
         {
           led_show_pattern(leds_data, &pattern_wifi_connecting2);
           led_show();
@@ -157,8 +174,10 @@ void loop()
         wifi_disconnect();
       }
       break;
+    }
 
     case SYS_WIFI_STADUS:
+    {
       if (wifi_connect() == WIFI_CONNECTED)
       {
         // show ok logo
@@ -180,7 +199,7 @@ void loop()
           led_show_pattern(leds_data, &pattern_wifi_connect_ng);
           led_show();
         }
-        else if (sys_interval_decision(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0) && sys_cnt != 0)
+        else if (sys_interval_decision(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
         {
           led_clear();
         }
@@ -199,8 +218,10 @@ void loop()
       }
 
       break;
+    }
 
     case SYS_REAL_TIME:
+    {
       if (sys_cnt >= SYS_FREQ * 1)
       {
         sys_cnt = 0;
@@ -210,15 +231,33 @@ void loop()
         led_show();
       }
       break;
+    }
 
     case SYS_FFT:
+    {
+      if (adc_cnt >= ADC_SAMPLES && sys_cnt >= FFT_FPS)
+      {
+        /*FFT运算*/
+        FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD); /* Weigh data */
+        FFT.Compute(FFT_FORWARD);                        /* Compute FFT */
+        FFT.ComplexToMagnitude();                        /* Compute magnitudes */
 
-      break;
+        fill_rainbow(leds, LED_NUM, 0, 4); // 设置彩虹渐变，先填充满，然后根据取值大小填充黑色，表示熄灭灯
+        for (int i = 0; i < LED_COL; i++)
+          drawBar(i, (fftReal[i * 4 + 0] + fftReal[i * 4 + 1] + fftReal[i * 4 + 2] + fftReal[i * 4 + 3]) / 4 / 200, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
+
+        FastLED.show();
+        adc_cnt = 0;
+        break;
+      }
+    }
 
     case SYS_ERR:
+    {
       printf("sys err! restart");
       ESP.restart();
       break;
+    }
 
     default:
       sys_mode = SYS_ERR;
@@ -307,7 +346,7 @@ void show_real_time()
   real_t = time_base + time_offset;
   p_time = localtime(&real_t);
   strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
-  led_show_char(leds_data, 2, 2, led_show_text, LED_SZIE_45, intToRGB((u32)(time_offset * 194)));
+  led_show_char(leds_data, 2, 2, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
   printf("real time %s\n", led_show_text);
 
   // led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::MediumBlue);
@@ -403,7 +442,7 @@ bool wifi_disconnect()
   return res;
 }
 
-u32 intToRGB(u32 value)
+u32 int2rgb(u32 value)
 {
   value = value & 0xffffff;
   double hue = (double)value / 16777215.0;
@@ -455,3 +494,54 @@ u32 intToRGB(u32 value)
 
   return (u32)((red + m) * 255) << 16 | (u32)((green + m) * 255) << 8 | (u32)((blue + m) * 255);
 }
+
+void adc_timer_isr()
+{
+  if (adc_cnt >= ADC_SAMPLES)
+    return;
+
+  fftReal[adc_cnt] = analogRead(ADC_CHANNEL); // 读取模拟值，信号采样
+  fftImag[adc_cnt] = 0;
+  adc_cnt++;
+}
+
+void drawBar(u16 idx, s16 value, u8 *flag) // 绘制函数，按序号和幅度值绘制条形块
+{
+  static s16 volume[8]; // 保存下降数据
+  constrain(value, 0, 8);   // 幅度限制在0-8范围内
+
+  if (volume[idx] < value) // 采集到的数据比之前大则更新，实现上冲效果
+    volume[idx] = value;
+
+  if (idx % 2)
+  { // 余2运算判断序号是否为奇数
+    for (int i = 0; i < 8 - volume[idx]; i++)
+      leds[idx * 8 + i] = CRGB::Black;
+  }
+  else
+  {
+    for (int i = volume[idx]; i < 8; i++)
+      leds[idx * 8 + i] = CRGB::Black;
+  }
+
+  if (*flag)
+  {
+    volume[idx] -= 1; // 达到时间则减小1，表示下落
+    if (idx == 7)
+      *flag = 0; // 第0-7列均更新完毕则清除标记
+  }
+}
+
+// void loop1()
+// {
+//   static uint32_t t = 0, dt = 70;
+//   static uint8_t flag = 0;
+
+//   FastLED.show(); // 显示灯条
+
+//   if ((millis() - t) > dt)
+//   {               // 读取时间，判断是否达到掉落时长
+//     flag = 1;     // 达到则标记为1
+//     t = millis(); // 更新时间
+//   }
+// }
