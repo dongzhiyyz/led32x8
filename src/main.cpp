@@ -42,34 +42,34 @@ void IRAM_ATTR key_sub_isr();
 /********************************************************/
 /********************************************************/
 
-s8 sys_mode = SYS_WIFI_START;
-s8 sys_mode_pre = sys_mode;
-const u16 FREQ_SYS = 1000; // 1kHz
-u16 sys_freq_cur = FREQ_SYS;
-hw_timer_t *sys_timer = NULL;
-vu8 DRAM_ATTR sys_scheduling = 0;
-vu32 DRAM_ATTR sys_cnt = 0;
+s8         sys_mode                 = SYS_WIFI_START;
+s8         sys_mode_pre             = sys_mode;
+const      u16 FREQ_SYS             = 100;             // 1kHz
+u16        sys_freq_cur             = FREQ_SYS;
+hw_timer_t *sys_timer               = NULL;
+vu8        DRAM_ATTR sys_scheduling = 0;
+vu32       DRAM_ATTR sys_cnt        = 0;
 
-s8 sys_test_cnt = 0;
-const u16 SYS_INTERVAL_0 = 600;
+s8    sys_test_cnt           = 0;
+const u16 SYS_INTERVAL_0     = 600;
 const u16 SYS_INTERVAL_OFS_0 = SYS_INTERVAL_0 >> 1;
 
 // user key
-u8 sys_key_cnt = 1;
-u8 sys_key_cnt_pre = 1;
-vu16 sys_key_delay = 0;
-u8 sys_key_delay_init = 1;
+u8   sys_key_cnt        = 1;
+u8   sys_key_cnt_pre    = 1;
+vu16 sys_key_delay      = 0;
+u8   sys_key_delay_init = 0;
 
 // Real-time
-time_t time_base = 0;
-time_t time_offset = 0;
-u32 get_net_time_cnt = 0;
-hw_timer_t *real_time_timer = NULL;       // 获取网络时间cnt
-const u32 GET_NET_TIME_CNT_LIMIT = 86400; // 24h * 60 * 60
+time_t     time_base                  = 0;
+time_t     time_offset                = 0;
+u32        get_net_time_cnt           = 0;
+hw_timer_t *real_time_timer           = NULL;   // 获取网络时间cnt
+const      u32 GET_NET_TIME_CNT_LIMIT = 86400;  // 24h * 60 * 60
 
-const char api_weather_lives[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=";
+const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=";
 const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=&extensions=all";
-const char api_time[] = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
+const char api_time[]             = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
 
 // Define the array of leds
 char led_show_text[20];
@@ -77,17 +77,15 @@ CRGB DRAM_ATTR leds[LED_NUM];
 u32 DRAM_ATTR leds_data[LED_COL][LED_ROW];
 
 // ADC FFT
-const u8 ADC_CHANNEL = 34;
-const u16 FREQ_ADC = 8000;                 // Hz, 声音采样频率
-const u16 ADC_SAMPLES = 4 * LED_COL;       // 采样点数，必须为2的整数次幂
-const float FFT_FPS = FREQ_ADC * 1.0 / 30; // 30fps
+const u8 ADC_CHANNEL  = 34;
+const u16 FREQ_ADC    = 100;                  // Hz, 声音采样频率
+const u16 ADC_SAMPLES = 4 * LED_COL;          // 采样点数，必须为2的整数次幂
+const float FFT_FPS   = FREQ_ADC * 1.0 / 30;  // 30fps
 
-double fftReal[ADC_SAMPLES]; // FFT采样输入样本数组
-double fftImag[ADC_SAMPLES]; // FFT运算输出数组
-hw_timer_t *adc_timer = NULL;
-arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, FREQ_ADC); // 创建FFT对象
-u16 adc_cnt = 0;
-u8 fft_flag = 0;
+double fftReal[ADC_SAMPLES];  // FFT采样输入样本数组
+double fftImag[ADC_SAMPLES];  // FFT运算输出数组
+u8         fft_flag = 0;
+arduinoFFT FFT      = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, FREQ_ADC);  // 创建FFT对象
 
 /********************************************************/
 /********************************************************/
@@ -133,6 +131,8 @@ void setup()
 
 void loop()
 {
+  static u32 t = 0, dt = 70;
+
   while (sys_scheduling)
   {
 
@@ -217,14 +217,15 @@ void loop()
 
       if (sys_cnt > FREQ_SYS * 2.5)
       {
-        led_clear();
         if (wifi_connect() == WIFI_CONNECTED)
         {
           get_net_time_cnt = GET_NET_TIME_CNT_LIMIT;
           sys_mode = SYS_REAL_TIME;
         }
         else
-          sys_mode = SYS_FFT;
+          sys_mode = SYS_RAIN;
+        led_clear();
+        sys_key_delay_init = 1;          
       }
 
       break;
@@ -243,19 +244,20 @@ void loop()
 
     case SYS_FFT:
     {
-      static uint32_t t = 0, dt = 70;
-
-      if (adc_cnt >= ADC_SAMPLES && sys_cnt >= FFT_FPS)
+      if (sys_cnt >= FFT_FPS)
       {
+        for (u8 i = 0; i < ADC_SAMPLES; i++)
+        {
+          fftReal[i] = analogRead(ADC_CHANNEL); // 读取模拟值，信号采样
+          fftImag[i] = 0;
+        }
+        // for (adc_cnt = 0; adc_cnt < ADC_SAMPLES; adc_cnt++)
+        //   printf("adc: %d\n", fftReal[adc_cnt]);
+
         /*FFT运算*/
-        // printf("FFT\n");
         FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD); /* Weigh data */
         FFT.Compute(FFT_FORWARD);                        /* Compute FFT */
         FFT.ComplexToMagnitude();                        /* Compute magnitudes */
-        // for (u8 i = 0; i < 128; i++)
-        // {
-        //   printf("%d, %d\n", i, fftReal[i]);
-        // }
 
         if ((millis() - t) > dt)
         {               // 读取时间，判断是否达到掉落时长
@@ -269,20 +271,11 @@ void loop()
           fft_draw_bar(i, (fftReal[i * 2 + 0] + fftReal[i * 2 + 1]) / 5000, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
 
         FastLED.show(); // 8.5ms
-        adc_cnt = 0;
         sys_cnt = 0;
       }
-      else if (adc_cnt < ADC_SAMPLES) // 16ms
-      {
-        fftReal[adc_cnt] = analogRead(ADC_CHANNEL); // 读取模拟值，信号采样
-        fftImag[adc_cnt] = 0;
-        // printf("%d, %f\n", adc_cnt, fftReal[adc_cnt]);
-
-        adc_cnt++;
-      }
-      // printf("adc_cnt %d:", adc_cnt);
       break;
     }
+    
     case SYS_RAIN:
     {
       if (sys_interval(100))
