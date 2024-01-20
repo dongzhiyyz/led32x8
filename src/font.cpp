@@ -74,8 +74,8 @@ void led_show_char(u32 (*leds)[8], u8 x, u8 y, char *p, led_size size, u32 fc, u
 void led_show_pattern(u32 (*leds)[8], const pattern *src, u8 x, u8 y, u32 fc, u32 bc)
 {
     u16 idx = 0;
-    u8 col = min(src->col, LED_COL);
-    u8 row = min(src->row, LED_ROW);
+    u8 col = _min(src->col + x, LED_COL);
+    u8 row = _min(src->row + y, LED_ROW);
 
     for (u8 i = x; i < col; i++)
     {

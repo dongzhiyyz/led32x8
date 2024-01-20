@@ -18,12 +18,21 @@
 #include "ArduinoJson.h"
 #include "soc/rtc_wdt.h" //设置看门狗用
 #include "arduinoFFT.h"
+#include <AHT20.h>
 
 /********************************************************/
 /********************************************************/
 
 void sys_mode_change();
 void sys_freq_change(u16 freq);
+void sysmode_wifi_connecting();
+void sysmode_wifi_stadus();
+void sysmode_real_time();
+void sysmode_fft();
+void sysmode_rain();
+void sysmode_temp_hum();
+void sysmode_test();
+
 void IRAM_ATTR sys_timer_isr();
 void IRAM_ATTR real_time_timer_isr();
 bool sys_interval(u16 cycle_ms, u16 sys_ms = 0);
@@ -41,24 +50,33 @@ void IRAM_ATTR key_sub_isr();
 
 /********************************************************/
 /********************************************************/
+#define DEBUG 0
 
+#define dbg_reset digitalWrite(12, 0);
+#define debug_set digitalWrite(12, 1);
+
+#if (DEBUG == 0)
 s8         sys_mode                 = SYS_WIFI_START;
+#else
+s8         sys_mode                 = SYS_FFT;
+#endif
 s8         sys_mode_pre             = sys_mode;
-const      u16 FREQ_SYS             = 100;             // 1kHz
+u8         sys_mode_change_init     = 0;
+const      u16 FREQ_SYS             = 1000;      // 1kHz
 u16        sys_freq_cur             = FREQ_SYS;
 hw_timer_t *sys_timer               = NULL;
 vu8        DRAM_ATTR sys_scheduling = 0;
 vu32       DRAM_ATTR sys_cnt        = 0;
 
 s8    sys_test_cnt           = 0;
-const u16 SYS_INTERVAL_0     = 600;
+const u16 SYS_INTERVAL_0     = 450;
 const u16 SYS_INTERVAL_OFS_0 = SYS_INTERVAL_0 >> 1;
 
 // user key
 u8   sys_key_cnt        = 1;
 u8   sys_key_cnt_pre    = 1;
 vu16 sys_key_delay      = 0;
-u8   sys_key_delay_init = 0;
+u8   sys_key_delay_init = DEBUG;
 
 // Real-time
 time_t     time_base                  = 0;
@@ -67,8 +85,8 @@ u32        get_net_time_cnt           = 0;
 hw_timer_t *real_time_timer           = NULL;   // 获取网络时间cnt
 const      u32 GET_NET_TIME_CNT_LIMIT = 86400;  // 24h * 60 * 60
 
-const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=";
-const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=&extensions=all";
+// const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=";
+// const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=&extensions=all";
 const char api_time[]             = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
 
 // Define the array of leds
@@ -78,20 +96,24 @@ u32 DRAM_ATTR leds_data[LED_COL][LED_ROW];
 
 // ADC FFT
 const u8 ADC_CHANNEL  = 34;
-const u16 FREQ_ADC    = 100;                  // Hz, 声音采样频率
+const u16 FREQ_ADC    = 1000;                 // Hz, 声音采样频率
 const u16 ADC_SAMPLES = 4 * LED_COL;          // 采样点数，必须为2的整数次幂
 const float FFT_FPS   = FREQ_ADC * 1.0 / 30;  // 30fps
 
 double fftReal[ADC_SAMPLES];  // FFT采样输入样本数组
 double fftImag[ADC_SAMPLES];  // FFT运算输出数组
-u8         fft_flag = 0;
-arduinoFFT FFT      = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, FREQ_ADC);  // 创建FFT对象
+arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, FREQ_ADC); // 创建FFT对象
+
+
+AHT20 aht20;
+
 
 /********************************************************/
 /********************************************************/
 
 void setup()
 {
+  pinMode(12, OUTPUT);
   Serial.begin(115200);
 
   // led init
@@ -107,7 +129,13 @@ void setup()
 
   // adc init
   pinMode(ADC_CHANNEL, ANALOG); // 初始化麦克风接口为输入模式，表示读取麦克风数据
-  analogReadResolution(12);
+  // analogReadResolution(12);
+  // analogSetAttenuation(ADC_0db);
+
+  Wire.begin(26, 27); // Join I2C bus
+  // Check if the AHT20 will acknowledge
+  if (aht20.begin() == false)  
+    Serial.println("AHT20 not detected. Please check wiring. Freezing.");
 
   randomSeed(analogRead(25));
   pinMode(32, INPUT_PULLDOWN);
@@ -131,177 +159,49 @@ void setup()
 
 void loop()
 {
-  static u32 t = 0, dt = 70;
-
   while (sys_scheduling)
   {
 
     switch (sys_mode)
     {
+#if (DEBUG == 0)
     case SYS_WIFI_START:
-    {
       wifi_connect();
       sys_mode = SYS_WIFI_CONNECTING;
       break;
-    }
 
     case SYS_WIFI_CONNECTING:
-    {
-      switch (wifi_connect())
-      {
-      case WIFI_CONNECTING:
-        // show logo
-        if (sys_interval(SYS_INTERVAL_0, 0))
-        {
-          led_show_pattern(leds_data, &pattern_wifi_connecting3);
-          led_show();
-        }
-        else if (sys_interval(SYS_INTERVAL_0, 200))
-        {
-          led_show_pattern(leds_data, &pattern_wifi_connecting1);
-          led_show();
-        }
-        else if (sys_interval(SYS_INTERVAL_0, 400))
-        {
-          led_show_pattern(leds_data, &pattern_wifi_connecting2);
-          led_show();
-        }
-        break;
-
-      case WIFI_CONNECTED:
-      case WIFI_CONNECT_FAILED:
-        sys_mode = SYS_WIFI_STADUS;
-        break;
-
-      default:
-        break;
-      }
-
-      if (sys_cnt > FREQ_SYS * 10) // time out 10s
-      {
-        printf("wifi connect time out!\n");
-        sys_mode = SYS_WIFI_STADUS;
-        wifi_disconnect();
-      }
+      sysmode_wifi_connecting();
       break;
-    }
 
     case SYS_WIFI_STADUS:
-    {
-      if (wifi_connect() == WIFI_CONNECTED)
-      {
-        // show ok logo
-        if (sys_interval(SYS_INTERVAL_0, 0))
-        {
-          led_show_pattern(leds_data, &pattern_wifi_connect_ok);
-          led_show();
-        }
-        else if (sys_interval(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
-        {
-          led_clear();
-        }
-      }
-      else
-      {
-        // show ng logo
-        if (sys_interval(SYS_INTERVAL_0, 0))
-        {
-          led_show_pattern(leds_data, &pattern_wifi_connect_ng);
-          led_show();
-        }
-        else if (sys_interval(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
-        {
-          led_clear();
-        }
-      }
-
-      if (sys_cnt > FREQ_SYS * 2.5)
-      {
-        if (wifi_connect() == WIFI_CONNECTED)
-        {
-          get_net_time_cnt = GET_NET_TIME_CNT_LIMIT;
-          sys_mode = SYS_REAL_TIME;
-        }
-        else
-          sys_mode = SYS_RAIN;
-        led_clear();
-        sys_key_delay_init = 1;          
-      }
-
+      sysmode_wifi_stadus();
       break;
-    }
 
     case SYS_REAL_TIME:
-    {
-      if (sys_cnt >= FREQ_SYS * 0.1)
-      {
-        sys_cnt = 0;
-        show_real_time();
-        led_show();
-      }
+      sysmode_real_time();
       break;
-    }
-
+#endif
     case SYS_FFT:
-    {
-      if (sys_cnt >= FFT_FPS)
-      {
-        for (u8 i = 0; i < ADC_SAMPLES; i++)
-        {
-          fftReal[i] = analogRead(ADC_CHANNEL); // 读取模拟值，信号采样
-          fftImag[i] = 0;
-        }
-        // for (adc_cnt = 0; adc_cnt < ADC_SAMPLES; adc_cnt++)
-        //   printf("adc: %d\n", fftReal[adc_cnt]);
-
-        /*FFT运算*/
-        FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD); /* Weigh data */
-        FFT.Compute(FFT_FORWARD);                        /* Compute FFT */
-        FFT.ComplexToMagnitude();                        /* Compute magnitudes */
-
-        if ((millis() - t) > dt)
-        {               // 读取时间，判断是否达到掉落时长
-          fft_flag = 1; // 达到则标记为1
-          t = millis(); // 更新时间
-        }
-        fill_rainbow(leds, LED_NUM, 0, 4);              // 设置彩虹渐变，先填充满，然后根据取值大小填充黑色，表示熄灭灯
-        fft_draw_bar(0, fftReal[1] / 10000, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
-
-        for (int i = 1; i < LED_COL; i++)
-          fft_draw_bar(i, (fftReal[i * 2 + 0] + fftReal[i * 2 + 1]) / 5000, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
-
-        FastLED.show(); // 8.5ms
-        sys_cnt = 0;
-      }
+      sysmode_fft();
       break;
-    }
-    
+
     case SYS_RAIN:
-    {
-      if (sys_interval(100))
-      {
-        pattern_move(0, 0, 31, 7, MOVE_DOWN);
-        for (u8 i = 0; i < 10; i++)
-        {
-          leds_data[random(0, LED_COL)][LED_ROW - 1] = int2rgb(random(10, 0xffffff));
-        }
-        led_show();
-      }
-
+      sysmode_rain();
       break;
-    }
+
+    case SYS_TEMP_HUM:
+      sysmode_temp_hum();
+      break;
 
     case SYS_TEST:
-    {
+      sysmode_test();
       break;
-    }
 
     case SYS_ERR:
-    {
       printf("sys err! restart");
       ESP.restart();
       break;
-    }
 
     default:
       sys_mode = SYS_ERR;
@@ -309,15 +209,15 @@ void loop()
     }
 
     // rtc_wdt_feed(); // 喂狗函数
-    sys_scheduling = 0;
     sys_mode_change();
-
     if (sys_mode_pre != sys_mode)
     {
       printf("sys mode change,running mode: %d\n", sys_mode);
       sys_mode_pre = sys_mode;
       sys_cnt = 0;
     }
+
+    sys_scheduling = 0;
   }
 }
 
@@ -350,19 +250,218 @@ void sys_mode_change()
   sys_key_delay = sys_freq_cur >> 2;
   sys_key_cnt_pre = sys_key_cnt = 1;
   sys_key_delay_init = 1;
+  sys_mode_change_init = 0;
 }
 
 void sys_freq_change(u16 freq)
 {
   if (sys_freq_cur == freq)
   {
-    printf("Sys freq is same\n");
+    printf("sys freq is same\n");
     return;
   }
 
   sys_freq_cur = freq;
   timerAlarmWrite(sys_timer, 1000000 / freq, true);
-  printf("Sys freq change to: %dHz\n", freq);
+  printf("sys freq change to: %dHz\n", freq);
+}
+
+void sysmode_wifi_connecting()
+{
+  switch (wifi_connect())
+  {
+  case WIFI_CONNECTING:
+    // show logo
+    if (sys_interval(SYS_INTERVAL_0, 0))
+    {
+      led_show_pattern(leds_data, &pattern_wifi_connecting3);
+      led_show();
+    }
+    else if (sys_interval(SYS_INTERVAL_0, 150))
+    {
+      led_show_pattern(leds_data, &pattern_wifi_connecting1);
+      led_show();
+    }
+    else if (sys_interval(SYS_INTERVAL_0, 300))
+    {
+      led_show_pattern(leds_data, &pattern_wifi_connecting2);
+      led_show();
+    }
+    break;
+
+  case WIFI_CONNECTED:
+  case WIFI_CONNECT_FAILED:
+    sys_mode = SYS_WIFI_STADUS;
+    break;
+
+  default:
+    break;
+  }
+
+  if (sys_cnt > FREQ_SYS * 10) // time out 10s
+  {
+    printf("wifi connect time out!\n");
+    sys_mode = SYS_WIFI_STADUS;
+    wifi_disconnect();
+  }
+}
+
+void sysmode_wifi_stadus()
+{
+  if (wifi_connect() == WIFI_CONNECTED)
+  {
+    // show ok logo
+    if (sys_interval(SYS_INTERVAL_0, 0))
+    {
+      led_show_pattern(leds_data, &pattern_wifi_connect_ok);
+      led_show();
+    }
+    else if (sys_interval(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
+    {
+      led_clear();
+    }
+  }
+  else
+  {
+    // show ng logo
+    if (sys_interval(SYS_INTERVAL_0, 0))
+    {
+      led_show_pattern(leds_data, &pattern_wifi_connect_ng);
+      led_show();
+    }
+    else if (sys_interval(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
+    {
+      led_clear();
+    }
+  }
+
+  if (sys_cnt > FREQ_SYS * 1.5)
+  {
+    if (wifi_connect() == WIFI_CONNECTED)
+    {
+      get_net_time_cnt = GET_NET_TIME_CNT_LIMIT;
+      sys_mode = SYS_REAL_TIME;
+    }
+    else
+      sys_mode = SYS_RAIN;
+    led_clear();
+    sys_key_delay_init = 1;
+  }
+}
+
+void sysmode_real_time()
+{
+  if (sys_cnt >= FREQ_SYS * 0.1)
+  {
+    sys_cnt = 0;
+    show_real_time();
+    led_show();
+  }
+}
+
+void sysmode_fft()
+{
+  static u32 t = 0, dt = 20;
+  static u8 fft_flag = 0;
+
+  if (sys_cnt >= FFT_FPS)
+  {
+    sys_cnt = 0;
+    debug_set;
+
+    // 13ms, 10khz
+    for (u8 i = 0; i < ADC_SAMPLES; i++)
+    {
+      fftReal[i] = analogRead(ADC_CHANNEL); // 读取模拟值，信号采样
+      fftImag[i] = 0;
+    }
+    dbg_reset;
+
+    u16 min_ = 4095;
+    for (u8 i = 0; i < ADC_SAMPLES; i++)
+      min_ = _min(min_, fftReal[i]);
+
+    for (u8 i = 0; i < ADC_SAMPLES; i++)
+      fftReal[i] -= min_;
+
+    // for (u8 i = 0; i < ADC_SAMPLES; i++)
+    //   printf("adc: %f\n", fftReal[i]);
+
+    /*FFT运算*/
+    FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD); /* Weigh data */
+    FFT.Compute(FFT_FORWARD);                        /* Compute FFT */
+    FFT.ComplexToMagnitude();                        /* Compute magnitudes */
+    // for (u8 i = 0; i < ADC_SAMPLES; i++)
+    //   printf("fft: %f\n", fftReal[i]);
+
+    if ((millis() - t) > dt)
+    {               // 读取时间，判断是否达到掉落时长
+      fft_flag = 1; // 达到则标记为1
+      t = millis(); // 更新时间
+    }
+    fill_rainbow(leds, LED_NUM, 0, 4);              // 设置彩虹渐变，先填充满，然后根据取值大小填充黑色，表示熄灭灯
+    // fft_draw_bar(0, fftReal[1] / 40000, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
+
+    for (u8 i = 0; i < LED_COL >> 1; i++)
+      fft_draw_bar(i, (fftReal[i * 2 + 10] + fftReal[i * 2 + 11]) / 450.0, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
+    for (u8 i = LED_COL >> 1; i < LED_COL; i++)
+      fft_draw_bar(i, (fftReal[i * 2 + 10] + fftReal[i * 2 + 11]) / 250.0, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
+
+    FastLED.show(); // 8ms
+  }
+}
+
+void sysmode_rain()
+{
+  if (sys_interval(100))
+  {
+    pattern_move(0, 0, 31, 7, MOVE_DOWN);
+    for (u8 i = 0; i < 10; i++)
+    {
+      leds_data[random(0, LED_COL)][LED_ROW - 1] = int2rgb(random(10, 0xffffff));
+    }
+    led_show();
+  }
+}
+
+void sysmode_temp_hum()
+{
+  if (sys_interval(1000) || sys_mode_change_init == 0)
+  {
+    sys_cnt = 0;
+    if (aht20.available() == true)
+    {
+      led_clear();
+      sys_mode_change_init = 1;
+      led_show_pattern(leds_data, &pattern_temp, 1, 0);
+      led_show_pattern(leds_data, &pattern_humidity, 17, 0);
+
+      // Get the new temperature and humidity value
+      float temperature = aht20.getTemperature();
+      float humidity = aht20.getHumidity();
+      constrain(temperature, 0, 99);
+      constrain(humidity, 0, 99);
+      // Print the results
+      // Serial.print("Temperature: ");
+      // Serial.print(temperature, 2);
+      // Serial.print(" C\t");
+      // Serial.print("Humidity: ");
+      // Serial.print(humidity, 2);
+      // Serial.print("% RH");
+      // Serial.println();
+
+      sprintf(led_show_text,"%d", (u8)temperature);
+      led_show_char(leds_data, 7, 0, led_show_text, LED_SZIE_48, int2rgb((u32)(time_offset * 194)));
+      sprintf(led_show_text,"%d", (u8)humidity);
+      led_show_char(leds_data, 23, 0, led_show_text, LED_SZIE_48, int2rgb((u32)(time_offset * 194)));
+    }
+    led_show();
+
+  }
+}
+
+void sysmode_test()
+{
 }
 
 void IRAM_ATTR sys_timer_isr()

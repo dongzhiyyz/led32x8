@@ -32,11 +32,13 @@ const s8 SYS_WIFI_STADUS     = 2;
 const s8 SYS_REAL_TIME       = 3;
 const s8 SYS_FFT             = 4;
 const s8 SYS_RAIN            = 5;
+const s8 SYS_TEMP_HUM        = 6;
+
 const s8 SYS_TEST            = 0x70;
 const s8 SYS_ERR             = 0x7f;
 
 const u8 SYS_FIRST = SYS_REAL_TIME;
-const u8 SYS_FINAL = SYS_RAIN;
+const u8 SYS_FINAL = SYS_TEMP_HUM;
 
 
 typedef enum
