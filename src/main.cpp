@@ -28,10 +28,11 @@ void sys_freq_change(u16 freq);
 void sysmode_wifi_connecting();
 void sysmode_wifi_stadus();
 void sysmode_real_time();
+void sysmode_real_time_weather();
 void sysmode_fft();
 void sysmode_rain();
 void sysmode_temp_hum();
-void sysmode_test();
+// void sysmode_test();
 
 void IRAM_ATTR sys_timer_isr();
 void IRAM_ATTR real_time_timer_isr();
@@ -50,15 +51,15 @@ void IRAM_ATTR key_sub_isr();
 
 /********************************************************/
 /********************************************************/
-#define DEBUG 0
+#define SYS_DEBUG1 1
 
 #define dbg_reset digitalWrite(12, 0);
 #define debug_set digitalWrite(12, 1);
 
-#if (DEBUG == 0)
+#if (SYS_DEBUG1 == 0)
 s8         sys_mode                 = SYS_WIFI_START;
 #else
-s8         sys_mode                 = SYS_FFT;
+s8         sys_mode                 = SYS_TEST;
 #endif
 s8         sys_mode_pre             = sys_mode;
 u8         sys_mode_change_init     = 0;
@@ -76,7 +77,7 @@ const u16 SYS_INTERVAL_OFS_0 = SYS_INTERVAL_0 >> 1;
 u8   sys_key_cnt        = 1;
 u8   sys_key_cnt_pre    = 1;
 vu16 sys_key_delay      = 0;
-u8   sys_key_delay_init = DEBUG;
+u8   sys_key_delay_init = SYS_DEBUG1;
 
 // Real-time
 time_t     time_base                  = 0;
@@ -96,13 +97,13 @@ u32 DRAM_ATTR leds_data[LED_COL][LED_ROW];
 
 // ADC FFT
 const u8 ADC_CHANNEL  = 34;
-const u16 FREQ_ADC    = 1000;                 // Hz, 声音采样频率
+const u16 FREQ_ADC    = 1000;                 
 const u16 ADC_SAMPLES = 4 * LED_COL;          // 采样点数，必须为2的整数次幂
 const float FFT_FPS   = FREQ_ADC * 1.0 / 30;  // 30fps
 
 double fftReal[ADC_SAMPLES];  // FFT采样输入样本数组
 double fftImag[ADC_SAMPLES];  // FFT运算输出数组
-arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, FREQ_ADC); // 创建FFT对象
+arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, 10000); // 创建FFT对象
 
 
 AHT20 aht20;
@@ -135,7 +136,7 @@ void setup()
   Wire.begin(26, 27); // Join I2C bus
   // Check if the AHT20 will acknowledge
   if (aht20.begin() == false)  
-    Serial.println("AHT20 not detected. Please check wiring. Freezing.");
+    Serial.println("AHT20 not detected. Please check wiring.");
 
   randomSeed(analogRead(25));
   pinMode(32, INPUT_PULLDOWN);
@@ -164,7 +165,7 @@ void loop()
 
     switch (sys_mode)
     {
-#if (DEBUG == 0)
+#if (SYS_DEBUG1 == 0)
     case SYS_WIFI_START:
       wifi_connect();
       sys_mode = SYS_WIFI_CONNECTING;
@@ -181,7 +182,6 @@ void loop()
     case SYS_REAL_TIME:
       sysmode_real_time();
       break;
-#endif
     case SYS_FFT:
       sysmode_fft();
       break;
@@ -193,9 +193,11 @@ void loop()
     case SYS_TEMP_HUM:
       sysmode_temp_hum();
       break;
+#endif
 
     case SYS_TEST:
-      sysmode_test();
+      sysmode_fft();
+      // sysmode_temp_hum();
       break;
 
     case SYS_ERR:
@@ -349,6 +351,14 @@ void sysmode_wifi_stadus()
   }
 }
 
+void sysmode_real_time_weather()
+{
+
+
+
+}
+
+
 void sysmode_real_time()
 {
   if (sys_cnt >= FREQ_SYS * 0.1)
@@ -377,12 +387,12 @@ void sysmode_fft()
     }
     dbg_reset;
 
-    u16 min_ = 4095;
-    for (u8 i = 0; i < ADC_SAMPLES; i++)
-      min_ = _min(min_, fftReal[i]);
+    // u16 min_ = 4095;
+    // for (u8 i = 0; i < ADC_SAMPLES; i++)
+    //   min_ = _min(min_, fftReal[i]);
 
-    for (u8 i = 0; i < ADC_SAMPLES; i++)
-      fftReal[i] -= min_;
+    // for (u8 i = 0; i < ADC_SAMPLES; i++)
+    //   fftReal[i] -= min_;
 
     // for (u8 i = 0; i < ADC_SAMPLES; i++)
     //   printf("adc: %f\n", fftReal[i]);
@@ -399,13 +409,13 @@ void sysmode_fft()
       fft_flag = 1; // 达到则标记为1
       t = millis(); // 更新时间
     }
-    fill_rainbow(leds, LED_NUM, 0, 4);              // 设置彩虹渐变，先填充满，然后根据取值大小填充黑色，表示熄灭灯
-    // fft_draw_bar(0, fftReal[1] / 40000, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
+    fill_rainbow(leds, LED_NUM, 0, 1);              // 设置彩虹渐变，先填充满，然后根据取值大小填充黑色，表示熄灭灯
+    // fft_draw_bar(0, fftReal[1] / 40000, &fft_flag); 
 
-    for (u8 i = 0; i < LED_COL >> 1; i++)
-      fft_draw_bar(i, (fftReal[i * 2 + 10] + fftReal[i * 2 + 11]) / 450.0, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
-    for (u8 i = LED_COL >> 1; i < LED_COL; i++)
-      fft_draw_bar(i, (fftReal[i * 2 + 10] + fftReal[i * 2 + 11]) / 250.0, &fft_flag); // 选取频谱中取平均后的4个值,传递时间标志到绘制函数
+    for (u8 i = 0; i < (LED_COL >> 1); i++)
+      fft_draw_bar(i, (fftReal[i * 2 + 4] + fftReal[i * 2 + 5]) / 450.0, &fft_flag);
+    for (u8 i = (LED_COL >> 1); i < LED_COL; i++)
+      fft_draw_bar(i, (fftReal[i * 2 + 4] + fftReal[i * 2 + 5]) / 280.0, &fft_flag);
 
     FastLED.show(); // 8ms
   }
@@ -426,42 +436,37 @@ void sysmode_rain()
 
 void sysmode_temp_hum()
 {
-  if (sys_interval(1000) || sys_mode_change_init == 0)
+  static u8 show_tmp = 0;
+
+  if (sys_interval(2000) || sys_mode_change_init == 0)
   {
     sys_cnt = 0;
+
     if (aht20.available() == true)
     {
       led_clear();
+      show_tmp = !show_tmp;
       sys_mode_change_init = 1;
-      led_show_pattern(leds_data, &pattern_temp, 1, 0);
-      led_show_pattern(leds_data, &pattern_humidity, 17, 0);
 
-      // Get the new temperature and humidity value
-      float temperature = aht20.getTemperature();
-      float humidity = aht20.getHumidity();
-      constrain(temperature, 0, 99);
-      constrain(humidity, 0, 99);
-      // Print the results
-      // Serial.print("Temperature: ");
-      // Serial.print(temperature, 2);
-      // Serial.print(" C\t");
-      // Serial.print("Humidity: ");
-      // Serial.print(humidity, 2);
-      // Serial.print("% RH");
-      // Serial.println();
-
-      sprintf(led_show_text,"%d", (u8)temperature);
-      led_show_char(leds_data, 7, 0, led_show_text, LED_SZIE_48, int2rgb((u32)(time_offset * 194)));
-      sprintf(led_show_text,"%d", (u8)humidity);
-      led_show_char(leds_data, 23, 0, led_show_text, LED_SZIE_48, int2rgb((u32)(time_offset * 194)));
+      if (show_tmp)
+      {
+        float temperature = aht20.getTemperature();
+        temperature = constrain(temperature, -99, 99);
+        led_show_pattern(leds_data, &pattern_temp, 5, 0);
+        sprintf(led_show_text, "%.1fC", temperature);
+        led_show_char(leds_data, 11, 1, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
+      }
+      else
+      {
+        float humidity = aht20.getHumidity();
+        humidity = constrain(humidity, -99, 99);
+        led_show_pattern(leds_data, &pattern_humidity, 5, 0);
+        sprintf(led_show_text, "%.1f%%", humidity);
+        led_show_char(leds_data, 11, 1, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
+      }
+      led_show();
     }
-    led_show();
-
   }
-}
-
-void sysmode_test()
-{
 }
 
 void IRAM_ATTR sys_timer_isr()
@@ -552,12 +557,12 @@ void show_real_time()
   real_t = time_base + time_offset;
   p_time = localtime(&real_t);
   strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
-  led_show_char(leds_data, 2, 2, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
+  led_show_char(leds_data, 2, 1, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
   // printf("real time %s\n", led_show_text);
 
   // led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::MediumBlue);
   // printf("show time ok\n");
-  // printf("time_base: %d, time_offset: %d\n", time_base, time_offset);
+  // printf("time_base: %d, time_offset: %d\n", time_base, time_offset);`
 }
 
 s8 get_real_time()
@@ -704,7 +709,7 @@ u32 int2rgb(u32 value)
 void fft_draw_bar(u16 idx, s16 value, u8 *flag) // 绘制函数，按序号和幅度值绘制条形块
 {
   static s16 volume[LED_COL];   // 保存下降数据
-  constrain(value, 0, LED_ROW); // 幅度限制在0-8范围内
+  value = constrain(value, 1, LED_ROW); // 幅度限制在0-8范围内
 
   if (volume[idx] < value) // 采集到的数据比之前大则更新，实现上冲效果
     volume[idx] = value;
@@ -736,10 +741,10 @@ void pattern_move(u8 x0, u8 y0, u8 x1, u8 y1, move_dir_t dir, u8 loop)
 {
   u32 buf[max(LED_ROW, LED_COL)];
 
-  constrain(x0, 0, LED_COL - 1);
-  constrain(x1, x0, LED_COL - 1);
-  constrain(y0, 0, LED_ROW - 1);
-  constrain(y1, y0, LED_ROW - 1);
+  x0 = constrain(x0, 0, LED_COL - 1);
+  x1 = constrain(x1, x0, LED_COL - 1);
+  y0 = constrain(y0, 0, LED_ROW - 1);
+  y1 = constrain(y1, y0, LED_ROW - 1);
 
   switch (dir)
   {

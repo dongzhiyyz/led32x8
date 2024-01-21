@@ -20,19 +20,20 @@ typedef volatile int16_t vs16;
 typedef volatile int32_t vs32;
 
 // LED
+const u8 DATA_PIN = 23;
+const u8 LED_ROTATION = 1;
 const u8 LED_ROW = 8;
 const u8 LED_COL = 32;
 const u16 LED_NUM = LED_ROW * LED_COL;
-const u8 DATA_PIN = 23;
-const u8 LED_ROTATION = 1;
 
-const s8 SYS_WIFI_START      = 0;
-const s8 SYS_WIFI_CONNECTING = 1;
-const s8 SYS_WIFI_STADUS     = 2;
-const s8 SYS_REAL_TIME       = 3;
-const s8 SYS_FFT             = 4;
-const s8 SYS_RAIN            = 5;
-const s8 SYS_TEMP_HUM        = 6;
+const s8 SYS_WIFI_START        = 0;
+const s8 SYS_WIFI_CONNECTING   = 1;
+const s8 SYS_WIFI_STADUS       = 2;
+const s8 SYS_REAL_TIME         = 3;
+const s8 SYS_REAL_TIME_WEATHER = 4;
+const s8 SYS_FFT               = 5;
+const s8 SYS_RAIN              = 6;
+const s8 SYS_TEMP_HUM          = 7;
 
 const s8 SYS_TEST            = 0x70;
 const s8 SYS_ERR             = 0x7f;
