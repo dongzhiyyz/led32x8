@@ -550,9 +550,18 @@ void show_real_time()
     }
   }
 
-  // printf("show time start\n");
-  static time_t real_t;
-  static struct tm *p_time;
+  if (get_net_time_cnt % EEPROM_SAVE_COLOR_LIMIT == 0)
+  {
+    if (EEPROM.readUInt(EEPROM_SAVE_COLOR_REG) != get_time_color())
+    {
+      EEPROM.writeUInt(EEPROM_SAVE_COLOR_REG, get_time_color());
+      if (EEPROM.commit())
+        printf("save time_offset ok\n");
+      else
+        printf("save time_offset ng\n");
+    }
+  }
+}
 
   real_t = time_base + time_offset;
   p_time = localtime(&real_t);
