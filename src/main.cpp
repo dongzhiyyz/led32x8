@@ -19,16 +19,21 @@
 #include "soc/rtc_wdt.h" //设置看门狗用
 #include "arduinoFFT.h"
 #include <AHT20.h>
+#include <EEPROM.h>
+
+
 
 /********************************************************/
 /********************************************************/
+
+
 
 void sys_mode_change();
 void sys_freq_change(u16 freq);
 void sysmode_wifi_connecting();
 void sysmode_wifi_stadus();
 void sysmode_real_time();
-void sysmode_real_time_weather();
+void sysmode_time_weather();
 void sysmode_fft();
 void sysmode_rain();
 void sysmode_temp_hum();
@@ -36,25 +41,30 @@ void sysmode_temp_hum();
 
 void IRAM_ATTR sys_timer_isr();
 void IRAM_ATTR real_time_timer_isr();
+void IRAM_ATTR key_press_isr();
 bool sys_interval(u16 cycle_ms, u16 sys_ms = 0);
-void led_show();
-void led_clear();
-void show_real_time();
-s8 get_real_time();
+void led_refresh();
+void led_clear(u8 x0 = 0, u8 y0 = 0, u8 x1 = LED_COL, u8 y1 = LED_ROW);
+u32 real_time_final();
+void get_net_time();
+u8 http_time();
 wifi_sts_t wifi_connect();
 bool wifi_disconnect();
 u32 int2rgb(u32 value);
 void fft_draw_bar(u16 idx, s16 value, u8 *flag); // 绘制函数，按序号和幅度值绘制条形块
 void pattern_move(u8 x0, u8 y0, u8 x1, u8 y1, move_dir_t dir, u8 loop = 0);
-void IRAM_ATTR key_add_isr();
-void IRAM_ATTR key_sub_isr();
+
+
 
 /********************************************************/
 /********************************************************/
+
+
+
 #define SYS_DEBUG1 1
 
-#define dbg_reset digitalWrite(12, 0);
-#define debug_set digitalWrite(12, 1);
+#define dbg_reset digitalWrite(12, 0)
+#define debug_set digitalWrite(12, 1)
 
 #if (SYS_DEBUG1 == 0)
 s8         sys_mode                 = SYS_WIFI_START;
@@ -74,21 +84,27 @@ const u16 SYS_INTERVAL_0     = 450;
 const u16 SYS_INTERVAL_OFS_0 = SYS_INTERVAL_0 >> 1;
 
 // user key
-u8   sys_key_cnt        = 1;
-u8   sys_key_cnt_pre    = 1;
-vu16 sys_key_delay      = 0;
-u8   sys_key_delay_init = SYS_DEBUG1;
+const u8 PIN_ADD_KEY               = 32;
+const u8 PIN_SUB_KEY               = 33;
+u8    sys_key_cnt                  = 1;
+u8    sys_key_cnt_pre              = 1;
+vu16  DRAM_ATTR sys_key_press_cnt  = 0;
+u8    DRAM_ATTR sys_key_press_init = 0;
 
 // Real-time
-time_t     time_base                  = 0;
-time_t     time_offset                = 0;
-u32        get_net_time_cnt           = 0;
-hw_timer_t *real_time_timer           = NULL;   // 获取网络时间cnt
-const      u32 GET_NET_TIME_CNT_LIMIT = 86400;  // 24h * 60 * 60
+const u16 EEPROM_COLOR_OFS_REG   = 0x00;
+const u32 EEPROM_COLOR_OFS_LIMIT = 60 * 20;  //20min
+const u32 GET_NET_TIME_CNT_LIMIT = 86400;    // 24h * 60 * 60
+
+hw_timer_t *real_time_timer = NULL;  // 获取网络时间cnt
+time_t     time_base        = 0;
+time_t     time_offset      = 0;
+u32        time_color_ofs   = 0;
+u32        get_net_time_cnt = 0;
 
 // const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=";
 // const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=&extensions=all";
-const char api_time[]             = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
+const char api_time[] = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp";
 
 // Define the array of leds
 char led_show_text[20];
@@ -96,21 +112,25 @@ CRGB DRAM_ATTR leds[LED_NUM];
 u32 DRAM_ATTR leds_data[LED_COL][LED_ROW];
 
 // ADC FFT
-const u8 ADC_CHANNEL  = 34;
-const u16 FREQ_ADC    = 1000;                 
-const u16 ADC_SAMPLES = 4 * LED_COL;          // 采样点数，必须为2的整数次幂
-const float FFT_FPS   = FREQ_ADC * 1.0 / 30;  // 30fps
+const u8 PIN_ADC_CHANNEL = 34;
+const u16 FREQ_ADC       = 1000;
+const u16 ADC_SAMPLES    = 4 * LED_COL;          // 采样点数，必须为2的整数次幂
+const float FFT_FPS      = FREQ_ADC * 1.0 / 30;  // 30fps
 
-double fftReal[ADC_SAMPLES];  // FFT采样输入样本数组
-double fftImag[ADC_SAMPLES];  // FFT运算输出数组
-arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, 10000); // 创建FFT对象
+double     fftReal[ADC_SAMPLES];                                    // FFT采样输入样本数组
+double     fftImag[ADC_SAMPLES];                                    // FFT运算输出数组
+arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, 10000);  // 创建FFT对象
 
-
+// Temperature + humidity
 AHT20 aht20;
 
 
+
 /********************************************************/
 /********************************************************/
+
+
+
 
 void setup()
 {
@@ -128,8 +148,13 @@ void setup()
   // rtc_wdt_enable();                       // 启用看门狗
   // rtc_wdt_set_time(RTC_WDT_STAGE0, 1000); // 设置看门狗超时 1s.则reset重启
 
+  // flash save data
+  EEPROM.begin(128);
+  time_color_ofs = EEPROM.readUInt(EEPROM_COLOR_OFS_REG);
+  printf("time_color_ofs: %u\n", time_color_ofs);
+
   // adc init
-  pinMode(ADC_CHANNEL, ANALOG); // 初始化麦克风接口为输入模式，表示读取麦克风数据
+  pinMode(PIN_ADC_CHANNEL, ANALOG); // 初始化麦克风接口为输入模式，表示读取麦克风数据
   // analogReadResolution(12);
   // analogSetAttenuation(ADC_0db);
 
@@ -139,15 +164,15 @@ void setup()
     Serial.println("AHT20 not detected. Please check wiring.");
 
   randomSeed(analogRead(25));
-  pinMode(32, INPUT_PULLDOWN);
-  pinMode(33, INPUT_PULLDOWN);
-  attachInterrupt(32, &key_add_isr, RISING);
-  attachInterrupt(33, &key_sub_isr, RISING);
+  pinMode(PIN_ADD_KEY, INPUT_PULLDOWN);
+  pinMode(PIN_SUB_KEY, INPUT_PULLDOWN);
+  attachInterrupt(PIN_ADD_KEY, &key_press_isr, RISING);
+  attachInterrupt(PIN_SUB_KEY, &key_press_isr, RISING);
 
   // realtime timer init
   real_time_timer = timerBegin(1, 80, true);
   timerAttachInterrupt(real_time_timer, &real_time_timer_isr, true);
-  timerAlarmWrite(real_time_timer, 1000000, true);
+  timerAlarmWrite(real_time_timer, 1000000, true); // 1s
   timerAlarmEnable(real_time_timer);
 
   // sys timer init
@@ -163,9 +188,15 @@ void loop()
   while (sys_scheduling)
   {
 
+    sys_scheduling = 0;
+    
     switch (sys_mode)
     {
 #if (SYS_DEBUG1 == 0)
+    case SYS_LOGO:
+
+      break;
+
     case SYS_WIFI_START:
       wifi_connect();
       sys_mode = SYS_WIFI_CONNECTING;
@@ -182,6 +213,11 @@ void loop()
     case SYS_REAL_TIME:
       sysmode_real_time();
       break;
+
+    case SYS_TIME_WEATHER:
+      sysmode_time_weather();
+      break;
+
     case SYS_FFT:
       sysmode_fft();
       break;
@@ -196,8 +232,21 @@ void loop()
 #endif
 
     case SYS_TEST:
-      sysmode_fft();
+      // sysmode_time_weather();
+      // sysmode_fft();
       // sysmode_temp_hum();
+
+      if (sys_interval(400))
+      {
+        led_show_pattern(leds_data, &pattern_pacman1, 12, 0);
+        led_refresh();
+      }
+      
+      else if (sys_interval(400, 200))
+      {
+        led_show_pattern(leds_data, &pattern_pacman2, 12, 0);
+        led_refresh();
+      }
       break;
 
     case SYS_ERR:
@@ -219,12 +268,14 @@ void loop()
       sys_cnt = 0;
     }
 
-    sys_scheduling = 0;
   }
 }
 
 void sys_mode_change()
-{
+{  
+  if (!sys_key_press_cnt)
+    sys_key_press_cnt = sys_freq_cur >> 5;
+
   if (sys_key_cnt == sys_key_cnt_pre)
     return;
 
@@ -249,9 +300,7 @@ void sys_mode_change()
     sys_freq_change(FREQ_SYS);
 
   led_clear();
-  sys_key_delay = sys_freq_cur >> 2;
   sys_key_cnt_pre = sys_key_cnt = 1;
-  sys_key_delay_init = 1;
   sys_mode_change_init = 0;
 }
 
@@ -277,17 +326,17 @@ void sysmode_wifi_connecting()
     if (sys_interval(SYS_INTERVAL_0, 0))
     {
       led_show_pattern(leds_data, &pattern_wifi_connecting3);
-      led_show();
+      led_refresh();
     }
     else if (sys_interval(SYS_INTERVAL_0, 150))
     {
       led_show_pattern(leds_data, &pattern_wifi_connecting1);
-      led_show();
+      led_refresh();
     }
     else if (sys_interval(SYS_INTERVAL_0, 300))
     {
       led_show_pattern(leds_data, &pattern_wifi_connecting2);
-      led_show();
+      led_refresh();
     }
     break;
 
@@ -316,7 +365,7 @@ void sysmode_wifi_stadus()
     if (sys_interval(SYS_INTERVAL_0, 0))
     {
       led_show_pattern(leds_data, &pattern_wifi_connect_ok);
-      led_show();
+      led_refresh();
     }
     else if (sys_interval(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
     {
@@ -329,7 +378,7 @@ void sysmode_wifi_stadus()
     if (sys_interval(SYS_INTERVAL_0, 0))
     {
       led_show_pattern(leds_data, &pattern_wifi_connect_ng);
-      led_show();
+      led_refresh();
     }
     else if (sys_interval(SYS_INTERVAL_0, SYS_INTERVAL_OFS_0))
     {
@@ -347,15 +396,7 @@ void sysmode_wifi_stadus()
     else
       sys_mode = SYS_RAIN;
     led_clear();
-    sys_key_delay_init = 1;
   }
-}
-
-void sysmode_real_time_weather()
-{
-
-
-
 }
 
 
@@ -364,8 +405,39 @@ void sysmode_real_time()
   if (sys_cnt >= FREQ_SYS * 0.1)
   {
     sys_cnt = 0;
-    show_real_time();
-    led_show();
+    get_net_time();
+    
+    time_t real_t;
+    struct tm *p_time;
+
+    real_t = time_base + time_offset;
+    p_time = localtime(&real_t);
+    strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
+    led_show_char(leds_data, 2, 1, led_show_text, LED_SZIE_45, int2rgb(real_time_final()));
+
+    led_refresh();
+  }
+}
+
+void sysmode_time_weather()
+{
+  if (sys_cnt >= FREQ_SYS * 0.1)
+  {
+    sys_cnt = 0;
+    // get_net_time();
+
+    time_t real_t;
+    struct tm *p_time;
+
+    real_t = time_base + time_offset;
+    p_time = localtime(&real_t);
+    strftime(led_show_text, sizeof(led_show_text), "%H:%M", p_time);
+    led_show_char(leds_data, 12, 1, led_show_text, LED_SZIE_45, int2rgb(real_time_final()));
+    if (time_offset & 1)
+      for (u8 i = 0; i < LED_ROW; i++)
+        leds_data[20][i] = 0;
+
+    led_refresh();
   }
 }
 
@@ -382,7 +454,7 @@ void sysmode_fft()
     // 13ms, 10khz
     for (u8 i = 0; i < ADC_SAMPLES; i++)
     {
-      fftReal[i] = analogRead(ADC_CHANNEL); // 读取模拟值，信号采样
+      fftReal[i] = analogRead(PIN_ADC_CHANNEL); // 读取模拟值，信号采样
       fftImag[i] = 0;
     }
     dbg_reset;
@@ -430,7 +502,7 @@ void sysmode_rain()
     {
       leds_data[random(0, LED_COL)][LED_ROW - 1] = int2rgb(random(10, 0xffffff));
     }
-    led_show();
+    led_refresh();
   }
 }
 
@@ -438,10 +510,9 @@ void sysmode_temp_hum()
 {
   static u8 show_tmp = 0;
 
-  if (sys_interval(2000) || sys_mode_change_init == 0)
+  if (sys_interval(3000) || sys_mode_change_init == 0)
   {
     sys_cnt = 0;
-
     if (aht20.available() == true)
     {
       led_clear();
@@ -454,7 +525,7 @@ void sysmode_temp_hum()
         temperature = constrain(temperature, -99, 99);
         led_show_pattern(leds_data, &pattern_temp, 5, 0);
         sprintf(led_show_text, "%.1fC", temperature);
-        led_show_char(leds_data, 11, 1, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
+        led_show_char(leds_data, 11, 1, led_show_text, LED_SZIE_45, int2rgb(real_time_final()));
       }
       else
       {
@@ -462,9 +533,9 @@ void sysmode_temp_hum()
         humidity = constrain(humidity, -99, 99);
         led_show_pattern(leds_data, &pattern_humidity, 5, 0);
         sprintf(led_show_text, "%.1f%%", humidity);
-        led_show_char(leds_data, 11, 1, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
+        led_show_char(leds_data, 11, 1, led_show_text, LED_SZIE_45, int2rgb(real_time_final()));
       }
-      led_show();
+      led_refresh();
     }
   }
 }
@@ -473,8 +544,20 @@ void IRAM_ATTR sys_timer_isr()
 {
   sys_cnt++;
   sys_scheduling++;
-  if (sys_key_delay && sys_key_delay_init)
-    sys_key_delay--;
+  if (sys_key_press_cnt && sys_key_press_init == 1)
+  {
+    sys_key_press_cnt--;
+    if (sys_key_press_cnt == 0)
+    {
+      if (digitalRead(PIN_ADD_KEY) == 1)
+        sys_key_cnt++;
+
+      else if (digitalRead(PIN_SUB_KEY) == 1)
+        sys_key_cnt--;
+
+      sys_key_press_init = 0;
+    }
+  }
 }
 
 void IRAM_ATTR real_time_timer_isr()
@@ -483,12 +566,17 @@ void IRAM_ATTR real_time_timer_isr()
   get_net_time_cnt++;
 }
 
+void IRAM_ATTR key_press_isr()
+{
+  sys_key_press_init = 1;
+}
+
 bool sys_interval(u16 cycle_ms, u16 ofs_ms)
 {
   return ((sys_cnt * 1000) % (sys_freq_cur * cycle_ms) == ofs_ms * 1000);
 }
 
-void led_show()
+void led_refresh()
 {
   u16 led_cnt = 0;
   for (u16 i = 0; i < LED_COL; i++)
@@ -515,8 +603,9 @@ void led_show()
   FastLED.show();
 }
 
-void led_clear()
+void led_clear(u8 x0, u8 y0 ,u8 x1, u8 y1)
 {
+  
   for (u8 i = 0; i < LED_COL; i++)
   {
     for (u8 j = 0; j < LED_ROW; j++)
@@ -524,10 +613,10 @@ void led_clear()
       leds_data[i][j] = 0;
     }
   }
-  // led_show();
+  // led_refresh();
 }
 
-void show_real_time()
+void get_net_time()
 {
   if (get_net_time_cnt >= GET_NET_TIME_CNT_LIMIT)
   {
@@ -536,7 +625,7 @@ void show_real_time()
     {
       get_net_time_cnt = 0;
       printf("get network time...\n");
-      if (!get_real_time())
+      if (!http_time())
       {
         time_offset = 0;
         printf("get network time ok!\n");
@@ -547,36 +636,34 @@ void show_real_time()
     else if (res == WIFI_CONNECT_FAILED)
     {
       get_net_time_cnt = 0;
+      printf("get network time ng!\n");
     }
   }
 
-  if (get_net_time_cnt % EEPROM_SAVE_COLOR_LIMIT == 0)
+  if (get_net_time_cnt % EEPROM_COLOR_OFS_LIMIT == 0)
   {
-    if (EEPROM.readUInt(EEPROM_SAVE_COLOR_REG) != get_time_color())
+    if (EEPROM.readUInt(EEPROM_COLOR_OFS_REG) != real_time_final())
     {
-      EEPROM.writeUInt(EEPROM_SAVE_COLOR_REG, get_time_color());
-      if (EEPROM.commit())
-        printf("save time_offset ok\n");
-      else
-        printf("save time_offset ng\n");
+      EEPROM.writeUInt(EEPROM_COLOR_OFS_REG, real_time_final());
+      EEPROM.commit();
+      // if (EEPROM.commit())
+      //   printf("save time_offset ok\n");
+      // else
+      //   printf("save time_offset ng\n");
     }
   }
 }
 
-  real_t = time_base + time_offset;
-  p_time = localtime(&real_t);
-  strftime(led_show_text, sizeof(led_show_text), "%H:%M:%S", p_time);
-  led_show_char(leds_data, 2, 1, led_show_text, LED_SZIE_45, int2rgb((u32)(time_offset * 194)));
-  // printf("real time %s\n", led_show_text);
-
-  // led_show_char(leds_data, 0, 0, led_show_text, LED_SZIE_48, (u32)CRGB::MediumBlue);
-  // printf("show time ok\n");
-  // printf("time_base: %d, time_offset: %d\n", time_base, time_offset);`
+u32 real_time_final()
+{
+  u32 tmp = time_offset * 194 + time_color_ofs;
+  tmp %= 0xffffff;
+  return tmp;
 }
 
-s8 get_real_time()
+u8 http_time()
 {
-  s8 ok = 0;
+  u8 ok = 0;
   HTTPClient http; // 声明HTTPClient对象
   StaticJsonDocument<150> timeDoc;
 
@@ -593,7 +680,7 @@ s8 get_real_time()
       if (error)                                                  // 检查反序列化是否成功
       {
         printf(error.c_str());
-        ok = -1;
+        ok = 1;
       }
       else
       {
@@ -607,12 +694,12 @@ s8 get_real_time()
       }
     }
     else
-      ok = -2;
+      ok = 2;
   }
   else
   {
     printf("[HTTP] GET Time failed, error: %s\n", http.errorToString(httpCode).c_str());
-    ok = -3;
+    ok = 3;
   }
   http.end(); // 结束当前连接
   return ok;
@@ -664,7 +751,9 @@ bool wifi_disconnect()
 
 u32 int2rgb(u32 value)
 {
-  value = value & 0xffffff;
+  if (value > 0xffffff)
+    value %= 0xffffff;
+
   double hue = (double)value / 16777215.0;
   double saturation = 1.0;
   double brightness = 1.0;
@@ -870,20 +959,3 @@ void pattern_move(u8 x0, u8 y0, u8 x1, u8 y1, move_dir_t dir, u8 loop)
   }
 }
 
-void IRAM_ATTR key_add_isr()
-{
-  if (sys_key_delay || !sys_key_delay_init)
-    return;
-
-  sys_key_cnt++;
-  sys_key_delay_init = 0;
-}
-
-void IRAM_ATTR key_sub_isr()
-{
-  if (sys_key_delay || !sys_key_delay_init)
-    return;
-
-  sys_key_cnt--;
-  sys_key_delay_init = 0;
-}
