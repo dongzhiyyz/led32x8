@@ -21,15 +21,12 @@
 #include <AHT20.h>
 #include <EEPROM.h>
 
-
-
 /********************************************************/
 /********************************************************/
-
-
 
 void sys_mode_change();
 void sys_freq_change(u16 freq);
+void sysmode_start_logo();
 void sysmode_wifi_connecting();
 void sysmode_wifi_stadus();
 void sysmode_real_time();
@@ -53,54 +50,55 @@ bool wifi_disconnect();
 u32 int2rgb(u32 value);
 void fft_draw_bar(u16 idx, s16 value, u8 *flag); // 绘制函数，按序号和幅度值绘制条形块
 void pattern_move(u8 x0, u8 y0, u8 x1, u8 y1, move_dir_t dir, u8 loop = 0);
-
-
+void pattern_move(const pattern *src, u8 x, u8 y, u8 pattern_col);
 
 /********************************************************/
 /********************************************************/
 
-
-
-#define SYS_DEBUG1 1
+#define SYS_DEBUG1 0
 
 #define dbg_reset digitalWrite(12, 0)
 #define debug_set digitalWrite(12, 1)
 
-#if (SYS_DEBUG1 == 0)
-s8         sys_mode                 = SYS_WIFI_START;
-#else
-s8         sys_mode                 = SYS_TEST;
-#endif
-s8         sys_mode_pre             = sys_mode;
-u8         sys_mode_change_init     = 0;
-const      u16 FREQ_SYS             = 1000;      // 1kHz
-u16        sys_freq_cur             = FREQ_SYS;
-hw_timer_t *sys_timer               = NULL;
-vu8        DRAM_ATTR sys_scheduling = 0;
-vu32       DRAM_ATTR sys_cnt        = 0;
+#define SYS_STOP (sys_cnt_stop = 1)
+#define SYS_RUN (sys_cnt_stop = 0)
 
-s8    sys_test_cnt           = 0;
-const u16 SYS_INTERVAL_0     = 450;
+#if (SYS_DEBUG1 == 0)
+s8 sys_mode = SYS_LOGO;
+#else
+s8 sys_mode = SYS_TEST;
+#endif
+s8 sys_mode_pre = sys_mode;
+u8 sys_mode_change_init = 0;
+const u16 FREQ_SYS = 1000; // 1kHz
+u16 sys_freq_cur = FREQ_SYS;
+hw_timer_t *sys_timer = NULL;
+vu8 DRAM_ATTR sys_cnt_stop = 0;
+vu8 DRAM_ATTR sys_scheduling = 0;
+vu32 DRAM_ATTR sys_cnt = 0;
+
+s8 sys_test_cnt = 0;
+const u16 SYS_INTERVAL_0 = 450;
 const u16 SYS_INTERVAL_OFS_0 = SYS_INTERVAL_0 >> 1;
 
 // user key
-const u8 PIN_ADD_KEY               = 32;
-const u8 PIN_SUB_KEY               = 33;
-u8    sys_key_cnt                  = 1;
-u8    sys_key_cnt_pre              = 1;
-vu16  DRAM_ATTR sys_key_press_cnt  = 0;
-u8    DRAM_ATTR sys_key_press_init = 0;
+const u8 PIN_ADD_KEY = 32;
+const u8 PIN_SUB_KEY = 33;
+u8 sys_key_cnt = 1;
+u8 sys_key_cnt_pre = 1;
+vu16 DRAM_ATTR sys_key_press_cnt = 0;
+u8 DRAM_ATTR sys_key_press_init = 0;
 
 // Real-time
-const u16 EEPROM_COLOR_OFS_REG   = 0x00;
-const u32 EEPROM_COLOR_OFS_LIMIT = 60 * 20;  //20min
-const u32 GET_NET_TIME_CNT_LIMIT = 86400;    // 24h * 60 * 60
+const u16 EEPROM_COLOR_OFS_REG = 0x00;
+const u32 EEPROM_COLOR_OFS_LIMIT = 60 * 20; // 20min
+const u32 GET_NET_TIME_CNT_LIMIT = 86400;   // 24h * 60 * 60
 
-hw_timer_t *real_time_timer = NULL;  // 获取网络时间cnt
-time_t     time_base        = 0;
-time_t     time_offset      = 0;
-u32        time_color_ofs   = 0;
-u32        get_net_time_cnt = 0;
+hw_timer_t *real_time_timer = NULL; // 获取网络时间cnt
+time_t time_base = 0;
+time_t time_offset = 0;
+u32 time_color_ofs = 0;
+u32 get_net_time_cnt = 0;
 
 // const char api_weather_lives[]    = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=";
 // const char api_weather_forecast[] = "https://restapi.amap.com/v3/weather/weatherInfo?city=闵行&key=&extensions=all";
@@ -113,24 +111,19 @@ u32 DRAM_ATTR leds_data[LED_COL][LED_ROW];
 
 // ADC FFT
 const u8 PIN_ADC_CHANNEL = 34;
-const u16 FREQ_ADC       = 1000;
-const u16 ADC_SAMPLES    = 4 * LED_COL;          // 采样点数，必须为2的整数次幂
-const float FFT_FPS      = FREQ_ADC * 1.0 / 30;  // 30fps
+const u16 FREQ_ADC = 1000;
+const u16 ADC_SAMPLES = 4 * LED_COL;       // 采样点数，必须为2的整数次幂
+const float FFT_FPS = FREQ_ADC * 1.0 / 30; // 30fps
 
-double     fftReal[ADC_SAMPLES];                                    // FFT采样输入样本数组
-double     fftImag[ADC_SAMPLES];                                    // FFT运算输出数组
-arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, 10000);  // 创建FFT对象
+double fftReal[ADC_SAMPLES];                                       // FFT采样输入样本数组
+double fftImag[ADC_SAMPLES];                                       // FFT运算输出数组
+arduinoFFT FFT = arduinoFFT(fftReal, fftImag, ADC_SAMPLES, 10000); // 创建FFT对象
 
 // Temperature + humidity
 AHT20 aht20;
 
-
-
 /********************************************************/
 /********************************************************/
-
-
-
 
 void setup()
 {
@@ -160,7 +153,7 @@ void setup()
 
   Wire.begin(26, 27); // Join I2C bus
   // Check if the AHT20 will acknowledge
-  if (aht20.begin() == false)  
+  if (aht20.begin() == false)
     Serial.println("AHT20 not detected. Please check wiring.");
 
   randomSeed(analogRead(25));
@@ -189,12 +182,12 @@ void loop()
   {
 
     sys_scheduling = 0;
-    
+
     switch (sys_mode)
     {
 #if (SYS_DEBUG1 == 0)
     case SYS_LOGO:
-
+      sysmode_start_logo();
       break;
 
     case SYS_WIFI_START:
@@ -235,18 +228,8 @@ void loop()
       // sysmode_time_weather();
       // sysmode_fft();
       // sysmode_temp_hum();
-
-      if (sys_interval(400))
-      {
-        led_show_pattern(leds_data, &pattern_pacman1, 12, 0);
-        led_refresh();
-      }
-      
-      else if (sys_interval(400, 200))
-      {
-        led_show_pattern(leds_data, &pattern_pacman2, 12, 0);
-        led_refresh();
-      }
+      // sysmode_start_logo();
+      sysmode_time_weather();
       break;
 
     case SYS_ERR:
@@ -267,12 +250,11 @@ void loop()
       sys_mode_pre = sys_mode;
       sys_cnt = 0;
     }
-
   }
 }
 
 void sys_mode_change()
-{  
+{
   if (!sys_key_press_cnt)
     sys_key_press_cnt = sys_freq_cur >> 5;
 
@@ -315,6 +297,67 @@ void sys_freq_change(u16 freq)
   sys_freq_cur = freq;
   timerAlarmWrite(sys_timer, 1000000 / freq, true);
   printf("sys freq change to: %dHz\n", freq);
+}
+
+void sysmode_start_logo()
+{
+  u8 en = 0;
+  static u8 col = 0;
+  static u8 pattern_col = 2;
+
+  if (!sys_mode_change_init)
+  {
+    led_show_pattern(leds_data, &pattern_loading_logo);
+    sys_mode_change_init = 1;
+    led_refresh();
+    sys_cnt = 0;
+  }
+
+  else if (sys_mode_change_init == 1)
+  {
+    if (sys_interval(800))
+    {
+      en = 1;
+      pattern_move(&pattern_pacman1, 0, 0, pattern_col);
+    }
+    else if (sys_interval(800, 400))
+    {
+      en = 1;
+      pattern_move(&pattern_pacman2, 0, 0, pattern_col);
+    }
+    if (en)
+    {
+      led_refresh();
+      pattern_col += 3;
+    }
+    if (pattern_col > pattern_pacman1.col)
+    {
+      sys_mode_change_init = 2;
+      sys_cnt = 0;
+    }
+  }
+
+  else
+  {
+    if (sys_interval(800))
+    {
+      en = 1;
+      led_show_pattern(leds_data, &pattern_pacman1, col, 0);
+    }
+    else if (sys_interval(800, 400))
+    {
+      en = 1;
+      led_show_pattern(leds_data, &pattern_pacman2, col, 0);
+    }
+    if (en)
+    {
+      led_clear(0, 0, col, LED_ROW);
+      led_refresh();
+      col += 3;
+    }
+    if (col > LED_COL)
+      sys_mode = SYS_WIFI_START;
+  }
 }
 
 void sysmode_wifi_connecting()
@@ -399,14 +442,13 @@ void sysmode_wifi_stadus()
   }
 }
 
-
 void sysmode_real_time()
 {
   if (sys_cnt >= FREQ_SYS * 0.1)
   {
     sys_cnt = 0;
     get_net_time();
-    
+
     time_t real_t;
     struct tm *p_time;
 
@@ -419,26 +461,72 @@ void sysmode_real_time()
   }
 }
 
+void weather_thunderstorm()
+{
+
+}
+
 void sysmode_time_weather()
 {
-  if (sys_cnt >= FREQ_SYS * 0.1)
-  {
-    sys_cnt = 0;
-    // get_net_time();
+  static u8 move_cnt = 0;
+  u8 refresh = 0;
 
+  SYS_STOP;
+  if (sys_interval(100))
+  {
     time_t real_t;
     struct tm *p_time;
 
     real_t = time_base + time_offset;
     p_time = localtime(&real_t);
     strftime(led_show_text, sizeof(led_show_text), "%H:%M", p_time);
-    led_show_char(leds_data, 12, 1, led_show_text, LED_SZIE_45, int2rgb(real_time_final()));
+    led_show_char(leds_data, 13, 1, led_show_text, LED_SZIE_45, int2rgb(real_time_final()));
     if (time_offset & 1)
       for (u8 i = 0; i < LED_ROW; i++)
-        leds_data[20][i] = 0;
-
-    led_refresh();
+        leds_data[21][i] = 0;
+    refresh = 1;
   }
+
+  if (!sys_mode_change_init)
+  {
+    led_show_pattern(leds_data, &pattern_weather_thunderstorm2, 2);
+    sys_mode_change_init = 1;
+    refresh = 1;
+  }
+  else
+  {
+    if (sys_interval(200) && move_cnt < 8)
+    {
+      pattern_move(2, 0, 9, 7, MOVE_RIGHT, 1);
+      move_cnt++;
+    }
+
+    if (move_cnt >= 8 && move_cnt < 12)
+    {
+      if (sys_interval(800))
+      {
+        led_show_pattern(leds_data, &pattern_weather_thunderstorm0, 2);
+        refresh = 1;
+      }
+      else if (sys_interval(800, 400))
+      {
+        led_show_pattern(leds_data, &pattern_weather_thunderstorm1, 2);
+        refresh = 1;
+        move_cnt++;
+      }
+    }
+
+    if (move_cnt >= 12)
+    {
+      led_show_pattern(leds_data, &pattern_weather_thunderstorm2, 2);
+      move_cnt = 0;
+      sys_cnt = 0;
+    }
+  }
+
+  SYS_RUN;
+  if (refresh)
+    led_refresh();
 }
 
 void sysmode_fft()
@@ -481,8 +569,8 @@ void sysmode_fft()
       fft_flag = 1; // 达到则标记为1
       t = millis(); // 更新时间
     }
-    fill_rainbow(leds, LED_NUM, 0, 1);              // 设置彩虹渐变，先填充满，然后根据取值大小填充黑色，表示熄灭灯
-    // fft_draw_bar(0, fftReal[1] / 40000, &fft_flag); 
+    fill_rainbow(leds, LED_NUM, 0, 1); // 设置彩虹渐变，先填充满，然后根据取值大小填充黑色，表示熄灭灯
+    // fft_draw_bar(0, fftReal[1] / 40000, &fft_flag);
 
     for (u8 i = 0; i < (LED_COL >> 1); i++)
       fft_draw_bar(i, (fftReal[i * 2 + 4] + fftReal[i * 2 + 5]) / 450.0, &fft_flag);
@@ -510,7 +598,7 @@ void sysmode_temp_hum()
 {
   static u8 show_tmp = 0;
 
-  if (sys_interval(3000) || sys_mode_change_init == 0)
+  if (sys_interval(2000) || sys_mode_change_init == 0)
   {
     sys_cnt = 0;
     if (aht20.available() == true)
@@ -542,6 +630,9 @@ void sysmode_temp_hum()
 
 void IRAM_ATTR sys_timer_isr()
 {
+  if (sys_cnt_stop)
+    return;
+
   sys_cnt++;
   sys_scheduling++;
   if (sys_key_press_cnt && sys_key_press_init == 1)
@@ -603,12 +694,11 @@ void led_refresh()
   FastLED.show();
 }
 
-void led_clear(u8 x0, u8 y0 ,u8 x1, u8 y1)
+void led_clear(u8 x0, u8 y0, u8 x1, u8 y1)
 {
-  
-  for (u8 i = 0; i < LED_COL; i++)
+  for (u8 i = x0; i < x1; i++)
   {
-    for (u8 j = 0; j < LED_ROW; j++)
+    for (u8 j = y0; j < y1; j++)
     {
       leds_data[i][j] = 0;
     }
@@ -806,7 +896,7 @@ u32 int2rgb(u32 value)
 
 void fft_draw_bar(u16 idx, s16 value, u8 *flag) // 绘制函数，按序号和幅度值绘制条形块
 {
-  static s16 volume[LED_COL];   // 保存下降数据
+  static s16 volume[LED_COL];           // 保存下降数据
   value = constrain(value, 1, LED_ROW); // 幅度限制在0-8范围内
 
   if (volume[idx] < value) // 采集到的数据比之前大则更新，实现上冲效果
@@ -959,3 +1049,19 @@ void pattern_move(u8 x0, u8 y0, u8 x1, u8 y1, move_dir_t dir, u8 loop)
   }
 }
 
+void pattern_move(const pattern *src, u8 x, u8 y, u8 pattern_col)
+{
+  u16 idx;
+  u8 row = _min(src->row + y, LED_ROW);
+  pattern_col = _min(pattern_col, src->row);
+
+  idx = (src->col - pattern_col) * src->row;
+  for (u8 i = x; i < pattern_col + x; i++)
+  {
+    for (u8 j = y; j < row; j++)
+    {
+      leds_data[i][j] = src->dat[idx];
+      idx++;
+    }
+  }
+}
